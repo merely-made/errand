@@ -9,7 +9,10 @@ edition = "2024"
 # published MIT/Apache (founding convention); genet's workspace default is MPL.
 license = "MPL-2.0"
 description = "Async small-web (smolweb) transport: gemini, gopher, finger, spartan, nex, guppy, and titan in one scheme-routed fetch, plus titan-upload and misfin-send write companions. Bytes in, bytes out, no HTTP, host-agnostic."
-repository = "https://github.com/merely-made/genet"
+# Landed in mere 2026-09-03 (platform boundary plan, P3). Inherited now:
+# mere's workspace repository is this crate's home, where genet's pointed
+# at upstream servo, which is why these lines were spelled out before.
+repository.workspace = true
 # Override genet's workspace-wide publish = false: errand is a published crate.
 publish = true
 keywords = ["gemini", "gopher", "smolweb", "nex", "guppy"]
