@@ -8,8 +8,9 @@
 //!
 //! The two XML flavours share one event-driven walker: they differ in element
 //! names but share the same logical shape — a feed-level title plus a sequence of
-//! entries, each with a title, link, date, and summary. RSS expresses links as
-//! element text; Atom uses `<link href=…>` attributes.
+//! entries, each with ordinary document facts plus raw podcast enclosure and
+//! extension resources. RSS expresses links as element text; Atom uses
+//! `<link href=…>` attributes.
 //!
 //! Summary handling is deliberately lossy: HTML in `<description>` / `<content>`
 //! is stripped to plain text (see [`strip_html_tags`]), and the count of stripped
@@ -29,18 +30,49 @@ pub struct Feed {
     pub subtitle: Option<String>,
     pub link: Option<String>,
     pub lang: Option<String>,
+    pub artwork: Option<String>,
     pub entries: Vec<FeedEntry>,
     /// How many entry summaries had HTML stripped (for a degraded-rendering hint).
     pub html_stripped: usize,
+    /// Namespaced elements that were not understood and therefore could not be
+    /// projected losslessly.
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FeedEnclosure {
+    pub url: String,
+    pub media_type: Option<String>,
+    pub byte_length: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PodcastResource {
+    pub url: String,
+    pub media_type: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PodcastTranscript {
+    pub url: String,
+    pub media_type: Option<String>,
+    pub language: Option<String>,
+    pub rel: Option<String>,
 }
 
 /// One feed entry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FeedEntry {
+    pub guid: Option<String>,
     pub title: Option<String>,
     pub link: Option<String>,
     pub date: Option<String>,
     pub summary: Option<String>,
+    pub enclosures: Vec<FeedEnclosure>,
+    pub duration: Option<String>,
+    pub artwork: Option<String>,
+    pub chapters: Vec<PodcastResource>,
+    pub transcripts: Vec<PodcastTranscript>,
 }
 
 /// A feed parse error (malformed or truncated XML).
@@ -67,43 +99,37 @@ pub fn parse(body: &str) -> Result<Feed, FeedError> {
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
+                let qualified = qualified_name(e.name().as_ref());
                 let local = local_name(e.name().as_ref());
                 state.start_element(local.clone());
-                if local == "link" {
-                    if let Some(href) = atom_href(&e) {
-                        state.set_link(href);
-                    }
-                }
-            },
+                state.inspect_element(&qualified, &local, element_attributes(&e));
+            }
             Ok(Event::Empty(e)) => {
-                // Atom self-closing <link href="..." rel="alternate"/>.
+                let qualified = qualified_name(e.name().as_ref());
                 let local = local_name(e.name().as_ref());
-                if local == "link" {
-                    if let Some(href) = atom_href(&e) {
-                        state.set_link(href);
-                    }
-                }
-            },
+                state.inspect_element(&qualified, &local, element_attributes(&e));
+            }
             Ok(Event::Text(t)) => {
                 let raw = std::str::from_utf8(t.as_ref()).map_err(err)?;
                 let unescaped = unescape(raw).map_err(err)?.into_owned();
                 state.append_text(&unescaped);
-            },
+            }
             Ok(Event::GeneralRef(r)) => {
                 // quick-xml 0.39 emits entity references as their own event,
                 // split out of surrounding Text. Resolve and append.
                 let name = std::str::from_utf8(r.as_ref()).map_err(err)?;
                 let unescaped = unescape(&format!("&{name};")).map_err(err)?.into_owned();
                 state.append_text(&unescaped);
-            },
+            }
             Ok(Event::CData(c)) => {
                 let raw = std::str::from_utf8(c.as_ref()).map_err(err)?;
                 state.append_text(raw);
-            },
+            }
             Ok(Event::End(e)) => {
+                let qualified = qualified_name(e.name().as_ref());
                 let local = local_name(e.name().as_ref());
-                state.end_element(&local);
-            },
+                state.end_element(&qualified, &local);
+            }
             Ok(Event::Eof) => {
                 if !state.path.is_empty() {
                     return Err(FeedError(format!(
@@ -112,9 +138,9 @@ pub fn parse(body: &str) -> Result<Feed, FeedError> {
                     )));
                 }
                 break;
-            },
+            }
             Err(e) => return Err(err(e)),
-            _ => {},
+            _ => {}
         }
         buf.clear();
     }
@@ -133,7 +159,7 @@ pub fn strip_html_tags(input: &str) -> String {
             '<' => in_tag = true,
             '>' => in_tag = false,
             _ if !in_tag => out.push(ch),
-            _ => {},
+            _ => {}
         }
     }
     let mut collapsed = String::with_capacity(out.len());
@@ -173,7 +199,7 @@ impl State {
         self.path.push(name);
     }
 
-    /// Apply an Atom `<link href=…>` to the entry or the feed, first-wins.
+    /// Apply an ordinary link to the entry or the feed, first-wins.
     fn set_link(&mut self, href: String) {
         if self.in_entry() {
             if let Some(entry) = &mut self.current_entry {
@@ -186,7 +212,92 @@ impl State {
         }
     }
 
-    fn end_element(&mut self, name: &str) {
+    fn inspect_element(&mut self, qualified: &str, local: &str, attributes: Vec<(String, String)>) {
+        if let Some(prefix) = qualified.split_once(':').map(|(prefix, _)| prefix)
+            && !matches!(prefix, "atom" | "rss" | "itunes" | "podcast")
+        {
+            let scope = if self.in_entry() { "entry" } else { "feed" };
+            self.feed.diagnostics.push(format!(
+                "unsupported extension element <{qualified}> in {scope}"
+            ));
+        }
+
+        let attribute = |name: &str| {
+            attributes
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+        };
+        match (qualified, local) {
+            (_, "link") => {
+                let Some(href) = attribute("href") else {
+                    return;
+                };
+                if attribute("rel").as_deref() == Some("enclosure") {
+                    let byte_length =
+                        parsed_length(attribute("length"), &mut self.feed.diagnostics);
+                    self.push_enclosure(href, attribute("type"), byte_length);
+                } else if attribute("rel")
+                    .as_deref()
+                    .is_none_or(|rel| rel == "alternate")
+                {
+                    self.set_link(href);
+                }
+            }
+            (_, "enclosure") => {
+                if let Some(url) = attribute("url") {
+                    let byte_length =
+                        parsed_length(attribute("length"), &mut self.feed.diagnostics);
+                    self.push_enclosure(url, attribute("type"), byte_length);
+                }
+            }
+            ("itunes:image", _) => {
+                if let Some(href) = attribute("href") {
+                    if let Some(entry) = &mut self.current_entry {
+                        entry.artwork.get_or_insert(href);
+                    } else {
+                        self.feed.artwork.get_or_insert(href);
+                    }
+                }
+            }
+            ("podcast:chapters", _) => {
+                if let (Some(entry), Some(url)) = (&mut self.current_entry, attribute("url")) {
+                    entry.chapters.push(PodcastResource {
+                        url,
+                        media_type: attribute("type"),
+                    });
+                }
+            }
+            ("podcast:transcript", _) => {
+                if let (Some(entry), Some(url)) = (&mut self.current_entry, attribute("url")) {
+                    entry.transcripts.push(PodcastTranscript {
+                        url,
+                        media_type: attribute("type"),
+                        language: attribute("language"),
+                        rel: attribute("rel"),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn push_enclosure(
+        &mut self,
+        url: String,
+        media_type: Option<String>,
+        byte_length: Option<u64>,
+    ) {
+        if let Some(entry) = &mut self.current_entry {
+            entry.enclosures.push(FeedEnclosure {
+                url,
+                media_type,
+                byte_length,
+            });
+        }
+    }
+
+    fn end_element(&mut self, qualified: &str, name: &str) {
         let text = std::mem::take(&mut self.pending_text);
         let trimmed = text.trim();
         let parent = self.path.iter().rev().nth(1).map(String::as_str);
@@ -194,23 +305,28 @@ impl State {
         if !trimmed.is_empty() {
             if let Some(entry) = &mut self.current_entry {
                 match name {
+                    "guid" | "id" => {
+                        if entry.guid.is_none() {
+                            entry.guid = Some(trimmed.to_string());
+                        }
+                    }
                     "title" => {
                         if entry.title.is_none() {
                             entry.title = Some(trimmed.to_string());
                         }
-                    },
+                    }
                     "link" => {
                         // Atom emits an empty <link/> with href; only RSS-style
                         // text content reaches here.
                         if entry.link.is_none() {
                             entry.link = Some(trimmed.to_string());
                         }
-                    },
+                    }
                     "pubDate" | "published" | "updated" => {
                         if entry.date.is_none() {
                             entry.date = Some(trimmed.to_string());
                         }
-                    },
+                    }
                     "description" | "summary" | "content" => {
                         if entry.summary.is_none() {
                             let had_tags = trimmed.contains('<');
@@ -219,8 +335,13 @@ impl State {
                                 self.feed.html_stripped += 1;
                             }
                         }
-                    },
-                    _ => {},
+                    }
+                    "duration" if qualified == "itunes:duration" => {
+                        if entry.duration.is_none() {
+                            entry.duration = Some(trimmed.to_string());
+                        }
+                    }
+                    _ => {}
                 }
             } else {
                 match name {
@@ -230,25 +351,25 @@ impl State {
                         {
                             self.feed.title = Some(trimmed.to_string());
                         }
-                    },
+                    }
                     "subtitle" | "description" => {
                         if matches!(parent, Some("channel") | Some("feed"))
                             && self.feed.subtitle.is_none()
                         {
                             self.feed.subtitle = Some(strip_html_tags(trimmed));
                         }
-                    },
+                    }
                     "link" => {
                         if matches!(parent, Some("channel")) && self.feed.link.is_none() {
                             self.feed.link = Some(trimmed.to_string());
                         }
-                    },
+                    }
                     "language" => {
                         if matches!(parent, Some("channel")) && self.feed.lang.is_none() {
                             self.feed.lang = Some(trimmed.to_string());
                         }
-                    },
-                    _ => {},
+                    }
+                    _ => {}
                 }
             }
         }
@@ -256,7 +377,12 @@ impl State {
         let popped = self.path.pop();
         if popped.as_deref() == Some("item") || popped.as_deref() == Some("entry") {
             if let Some(entry) = self.current_entry.take() {
-                if entry.title.is_some() || entry.link.is_some() || entry.summary.is_some() {
+                if entry.title.is_some()
+                    || entry.link.is_some()
+                    || entry.guid.is_some()
+                    || !entry.enclosures.is_empty()
+                    || entry.summary.is_some()
+                {
                     self.feed.entries.push(entry);
                 }
             }
@@ -273,17 +399,33 @@ fn local_name(qualified: &[u8]) -> String {
     s.rsplit(':').next().unwrap_or(s).to_string()
 }
 
-fn atom_href(element: &quick_xml::events::BytesStart<'_>) -> Option<String> {
-    for attr in element.attributes().flatten() {
-        if attr.key.local_name().as_ref() == b"href" {
-            return attr
-                .unescape_value()
-                .ok()
-                .map(|v| v.into_owned())
-                .filter(|s| !s.is_empty());
+fn qualified_name(qualified: &[u8]) -> String {
+    std::str::from_utf8(qualified).unwrap_or("").to_string()
+}
+
+fn element_attributes(element: &quick_xml::events::BytesStart<'_>) -> Vec<(String, String)> {
+    element
+        .attributes()
+        .flatten()
+        .filter_map(|attribute| {
+            let key = std::str::from_utf8(attribute.key.local_name().as_ref())
+                .ok()?
+                .to_string();
+            let value = attribute.unescape_value().ok()?.into_owned();
+            (!value.is_empty()).then_some((key, value))
+        })
+        .collect()
+}
+
+fn parsed_length(raw: Option<String>, diagnostics: &mut Vec<String>) -> Option<u64> {
+    let raw = raw?;
+    match raw.parse() {
+        Ok(length) => Some(length),
+        Err(_) => {
+            diagnostics.push(format!("invalid enclosure length {raw:?}"));
+            None
         }
     }
-    None
 }
 
 fn err<E: std::fmt::Display>(e: E) -> FeedError {
@@ -325,6 +467,28 @@ mod tests {
   </entry>
 </feed>"#;
 
+    const PODCAST_RSS: &str = r#"<?xml version="1.0"?>
+<rss version="2.0"
+  xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+  xmlns:podcast="https://podcastindex.org/namespace/1.0"
+  xmlns:mystery="https://example.test/mystery">
+  <channel>
+    <title>Field Notes</title>
+    <itunes:image href="/art/feed.jpg"/>
+    <item>
+      <guid isPermaLink="false">episode-42</guid>
+      <title>Wetland</title>
+      <link>/episodes/42</link>
+      <enclosure url="/audio/42.mp3" type="audio/mpeg" length="123456"/>
+      <itunes:duration>01:02:03</itunes:duration>
+      <itunes:image href="/art/42.jpg"/>
+      <podcast:chapters url="/chapters/42.json" type="application/json+chapters"/>
+      <podcast:transcript url="/transcripts/42.vtt" type="text/vtt" language="en" rel="captions"/>
+      <mystery:waveform bins="32"/>
+    </item>
+  </channel>
+</rss>"#;
+
     #[test]
     fn rss_parses_channel_and_items() {
         let feed = parse(RSS).expect("rss");
@@ -357,6 +521,53 @@ mod tests {
             feed.entries[0].date.as_deref(),
             Some("2026-01-01T00:00:00Z")
         );
+    }
+
+    #[test]
+    fn podcast_extensions_retain_raw_resources_and_diagnose_unknown_namespaces() {
+        let feed = parse(PODCAST_RSS).expect("podcast rss");
+        assert_eq!(feed.artwork.as_deref(), Some("/art/feed.jpg"));
+        let entry = &feed.entries[0];
+        assert_eq!(entry.guid.as_deref(), Some("episode-42"));
+        assert_eq!(entry.duration.as_deref(), Some("01:02:03"));
+        assert_eq!(entry.artwork.as_deref(), Some("/art/42.jpg"));
+        assert_eq!(
+            entry.enclosures,
+            [FeedEnclosure {
+                url: "/audio/42.mp3".into(),
+                media_type: Some("audio/mpeg".into()),
+                byte_length: Some(123_456),
+            }]
+        );
+        assert_eq!(entry.chapters[0].url, "/chapters/42.json");
+        assert_eq!(entry.transcripts[0].url, "/transcripts/42.vtt");
+        assert_eq!(entry.transcripts[0].language.as_deref(), Some("en"));
+        assert!(
+            feed.diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.contains("mystery:waveform"))
+        );
+    }
+
+    #[test]
+    fn atom_enclosure_and_id_use_the_same_entry_facts() {
+        let feed = parse(
+            r#"<feed xmlns="http://www.w3.org/2005/Atom">
+              <title>Audio</title>
+              <entry>
+                <id>tag:example.test,2026:7</id>
+                <title>Seven</title>
+                <link rel="alternate" href="/seven"/>
+                <link rel="enclosure" href="/seven.ogg" type="audio/ogg" length="77"/>
+              </entry>
+            </feed>"#,
+        )
+        .unwrap();
+        let entry = &feed.entries[0];
+        assert_eq!(entry.guid.as_deref(), Some("tag:example.test,2026:7"));
+        assert_eq!(entry.link.as_deref(), Some("/seven"));
+        assert_eq!(entry.enclosures[0].url, "/seven.ogg");
+        assert_eq!(entry.enclosures[0].byte_length, Some(77));
     }
 
     #[test]
