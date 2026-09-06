@@ -103,33 +103,33 @@ pub fn parse(body: &str) -> Result<Feed, FeedError> {
                 let local = local_name(e.name().as_ref());
                 state.start_element(local.clone());
                 state.inspect_element(&qualified, &local, element_attributes(&e));
-            }
+            },
             Ok(Event::Empty(e)) => {
                 let qualified = qualified_name(e.name().as_ref());
                 let local = local_name(e.name().as_ref());
                 state.inspect_element(&qualified, &local, element_attributes(&e));
-            }
+            },
             Ok(Event::Text(t)) => {
                 let raw = std::str::from_utf8(t.as_ref()).map_err(err)?;
                 let unescaped = unescape(raw).map_err(err)?.into_owned();
                 state.append_text(&unescaped);
-            }
+            },
             Ok(Event::GeneralRef(r)) => {
                 // quick-xml 0.39 emits entity references as their own event,
                 // split out of surrounding Text. Resolve and append.
                 let name = std::str::from_utf8(r.as_ref()).map_err(err)?;
                 let unescaped = unescape(&format!("&{name};")).map_err(err)?.into_owned();
                 state.append_text(&unescaped);
-            }
+            },
             Ok(Event::CData(c)) => {
                 let raw = std::str::from_utf8(c.as_ref()).map_err(err)?;
                 state.append_text(raw);
-            }
+            },
             Ok(Event::End(e)) => {
                 let qualified = qualified_name(e.name().as_ref());
                 let local = local_name(e.name().as_ref());
                 state.end_element(&qualified, &local);
-            }
+            },
             Ok(Event::Eof) => {
                 if !state.path.is_empty() {
                     return Err(FeedError(format!(
@@ -138,9 +138,9 @@ pub fn parse(body: &str) -> Result<Feed, FeedError> {
                     )));
                 }
                 break;
-            }
+            },
             Err(e) => return Err(err(e)),
-            _ => {}
+            _ => {},
         }
         buf.clear();
     }
@@ -159,7 +159,7 @@ pub fn strip_html_tags(input: &str) -> String {
             '<' => in_tag = true,
             '>' => in_tag = false,
             _ if !in_tag => out.push(ch),
-            _ => {}
+            _ => {},
         }
     }
     let mut collapsed = String::with_capacity(out.len());
@@ -243,14 +243,14 @@ impl State {
                 {
                     self.set_link(href);
                 }
-            }
+            },
             (_, "enclosure") => {
                 if let Some(url) = attribute("url") {
                     let byte_length =
                         parsed_length(attribute("length"), &mut self.feed.diagnostics);
                     self.push_enclosure(url, attribute("type"), byte_length);
                 }
-            }
+            },
             ("itunes:image", _) => {
                 if let Some(href) = attribute("href") {
                     if let Some(entry) = &mut self.current_entry {
@@ -259,7 +259,7 @@ impl State {
                         self.feed.artwork.get_or_insert(href);
                     }
                 }
-            }
+            },
             ("podcast:chapters", _) => {
                 if let (Some(entry), Some(url)) = (&mut self.current_entry, attribute("url")) {
                     entry.chapters.push(PodcastResource {
@@ -267,7 +267,7 @@ impl State {
                         media_type: attribute("type"),
                     });
                 }
-            }
+            },
             ("podcast:transcript", _) => {
                 if let (Some(entry), Some(url)) = (&mut self.current_entry, attribute("url")) {
                     entry.transcripts.push(PodcastTranscript {
@@ -277,8 +277,8 @@ impl State {
                         rel: attribute("rel"),
                     });
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -309,24 +309,24 @@ impl State {
                         if entry.guid.is_none() {
                             entry.guid = Some(trimmed.to_string());
                         }
-                    }
+                    },
                     "title" => {
                         if entry.title.is_none() {
                             entry.title = Some(trimmed.to_string());
                         }
-                    }
+                    },
                     "link" => {
                         // Atom emits an empty <link/> with href; only RSS-style
                         // text content reaches here.
                         if entry.link.is_none() {
                             entry.link = Some(trimmed.to_string());
                         }
-                    }
+                    },
                     "pubDate" | "published" | "updated" => {
                         if entry.date.is_none() {
                             entry.date = Some(trimmed.to_string());
                         }
-                    }
+                    },
                     "description" | "summary" | "content" => {
                         if entry.summary.is_none() {
                             let had_tags = trimmed.contains('<');
@@ -335,13 +335,13 @@ impl State {
                                 self.feed.html_stripped += 1;
                             }
                         }
-                    }
+                    },
                     "duration" if qualified == "itunes:duration" => {
                         if entry.duration.is_none() {
                             entry.duration = Some(trimmed.to_string());
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             } else {
                 match name {
@@ -351,25 +351,25 @@ impl State {
                         {
                             self.feed.title = Some(trimmed.to_string());
                         }
-                    }
+                    },
                     "subtitle" | "description" => {
                         if matches!(parent, Some("channel") | Some("feed"))
                             && self.feed.subtitle.is_none()
                         {
                             self.feed.subtitle = Some(strip_html_tags(trimmed));
                         }
-                    }
+                    },
                     "link" => {
                         if matches!(parent, Some("channel")) && self.feed.link.is_none() {
                             self.feed.link = Some(trimmed.to_string());
                         }
-                    }
+                    },
                     "language" => {
                         if matches!(parent, Some("channel")) && self.feed.lang.is_none() {
                             self.feed.lang = Some(trimmed.to_string());
                         }
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
         }
@@ -424,7 +424,7 @@ fn parsed_length(raw: Option<String>, diagnostics: &mut Vec<String>) -> Option<u
         Err(_) => {
             diagnostics.push(format!("invalid enclosure length {raw:?}"));
             None
-        }
+        },
     }
 }
 
