@@ -625,10 +625,16 @@ mod tests {
   </channel>
 </rss>"#;
         let entry = &parse(rss).unwrap().entries[0];
-        assert_eq!(entry.published.as_deref(), Some("Mon, 01 Jan 2026 00:00:00 GMT"));
+        assert_eq!(
+            entry.published.as_deref(),
+            Some("Mon, 01 Jan 2026 00:00:00 GMT")
+        );
         assert_eq!(entry.updated, None);
         assert_eq!(entry.summary.as_deref(), Some("Short teaser."));
-        assert_eq!(entry.content.as_deref(), Some("<p>The <b>whole</b> post.</p>"));
+        assert_eq!(
+            entry.content.as_deref(),
+            Some("<p>The <b>whole</b> post.</p>")
+        );
 
         let atom = r#"<?xml version="1.0"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
