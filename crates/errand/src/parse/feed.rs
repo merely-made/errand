@@ -12,10 +12,13 @@
 //! extension resources. RSS expresses links as element text; Atom uses
 //! `<link href=…>` attributes.
 //!
-//! Summary handling is deliberately lossy: HTML in `<description>` / `<content>`
+//! Summary handling is deliberately lossy: HTML in `<description>` / `<summary>`
 //! is stripped to plain text (see [`strip_html_tags`]), and the count of stripped
 //! entries is reported in [`Feed::html_stripped`] so a consumer can surface a
-//! "degraded" hint. JSON Feed is *not* handled here (it needs a JSON dependency a
+//! "degraded" hint. The full body (Atom `<content>`, RSS `<content:encoded>`) is
+//! kept as given in [`FeedEntry::content`], usually an HTML fragment; an entry
+//! with no summary falls back to its stripped content. Atom `type="xhtml"`
+//! content arrives as child elements and is not captured. JSON Feed is *not* handled here (it needs a JSON dependency a
 //! transport crate should not carry); a consumer parses it and builds a [`Feed`]
 //! itself — the public fields make that straightforward.
 
@@ -66,8 +69,18 @@ pub struct FeedEntry {
     pub guid: Option<String>,
     pub title: Option<String>,
     pub link: Option<String>,
+    /// The first date the entry carries, published or updated: one date to
+    /// show. [`Self::published`] and [`Self::updated`] keep them apart.
     pub date: Option<String>,
+    /// First published (RSS `pubDate`, Atom `published`).
+    pub published: Option<String>,
+    /// Last changed (Atom `updated`).
+    pub updated: Option<String>,
+    /// The abstract (RSS `description`, Atom `summary`), HTML stripped.
     pub summary: Option<String>,
+    /// The full body as given (Atom `content`, RSS `content:encoded`),
+    /// usually an HTML fragment.
+    pub content: Option<String>,
     pub enclosures: Vec<FeedEnclosure>,
     pub duration: Option<String>,
     pub artwork: Option<String>,
@@ -326,8 +339,26 @@ impl State {
                         if entry.date.is_none() {
                             entry.date = Some(trimmed.to_string());
                         }
+                        let slot = if name == "updated" {
+                            &mut entry.updated
+                        } else {
+                            &mut entry.published
+                        };
+                        if slot.is_none() {
+                            *slot = Some(trimmed.to_string());
+                        }
                     },
-                    "description" | "summary" | "content" => {
+                    "encoded" if qualified == "content:encoded" => {
+                        if entry.content.is_none() {
+                            entry.content = Some(trimmed.to_string());
+                        }
+                    },
+                    "content" => {
+                        if entry.content.is_none() {
+                            entry.content = Some(trimmed.to_string());
+                        }
+                    },
+                    "description" | "summary" => {
                         if entry.summary.is_none() {
                             let had_tags = trimmed.contains('<');
                             entry.summary = Some(strip_html_tags(trimmed));
@@ -376,7 +407,16 @@ impl State {
 
         let popped = self.path.pop();
         if popped.as_deref() == Some("item") || popped.as_deref() == Some("entry") {
-            if let Some(entry) = self.current_entry.take() {
+            if let Some(mut entry) = self.current_entry.take() {
+                // An entry with only a body still gets a summary to show.
+                if entry.summary.is_none() {
+                    if let Some(content) = &entry.content {
+                        if content.contains('<') {
+                            self.feed.html_stripped += 1;
+                        }
+                        entry.summary = Some(strip_html_tags(content));
+                    }
+                }
                 if entry.title.is_some()
                     || entry.link.is_some()
                     || entry.guid.is_some()
@@ -568,6 +608,49 @@ mod tests {
         assert_eq!(entry.link.as_deref(), Some("/seven"));
         assert_eq!(entry.enclosures[0].url, "/seven.ogg");
         assert_eq!(entry.enclosures[0].byte_length, Some(77));
+    }
+
+    #[test]
+    fn dates_and_bodies_stay_apart() {
+        let rss = r#"<?xml version="1.0"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel><title>Log</title>
+    <item>
+      <title>Post</title>
+      <guid>post-1</guid>
+      <pubDate>Mon, 01 Jan 2026 00:00:00 GMT</pubDate>
+      <description>Short &lt;i&gt;teaser&lt;/i&gt;.</description>
+      <content:encoded><![CDATA[<p>The <b>whole</b> post.</p>]]></content:encoded>
+    </item>
+  </channel>
+</rss>"#;
+        let entry = &parse(rss).unwrap().entries[0];
+        assert_eq!(entry.published.as_deref(), Some("Mon, 01 Jan 2026 00:00:00 GMT"));
+        assert_eq!(entry.updated, None);
+        assert_eq!(entry.summary.as_deref(), Some("Short teaser."));
+        assert_eq!(entry.content.as_deref(), Some("<p>The <b>whole</b> post.</p>"));
+
+        let atom = r#"<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Log</title>
+  <entry>
+    <title>Post</title>
+    <id>urn:post:2</id>
+    <published>2026-01-01T00:00:00Z</published>
+    <updated>2026-02-01T00:00:00Z</updated>
+    <content type="html">&lt;p&gt;Only a body.&lt;/p&gt;</content>
+  </entry>
+</feed>"#;
+        let entry = &parse(atom).unwrap().entries[0];
+        assert_eq!(entry.date.as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert_eq!(entry.published.as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert_eq!(entry.updated.as_deref(), Some("2026-02-01T00:00:00Z"));
+        assert_eq!(entry.content.as_deref(), Some("<p>Only a body.</p>"));
+        assert_eq!(
+            entry.summary.as_deref(),
+            Some("Only a body."),
+            "an entry with no summary shows its stripped body"
+        );
     }
 
     #[test]
