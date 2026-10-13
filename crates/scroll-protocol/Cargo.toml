@@ -2,7 +2,8 @@
 name = "scroll-protocol"
 version = "0.1.0"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "An implementation of the Scroll protocol (scroll://) and the scrolltext format: async client with language negotiation, document metadata, UDC classification, and abstracts, plus a dependency-free text/scroll parser."

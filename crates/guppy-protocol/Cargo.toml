@@ -2,7 +2,8 @@
 name = "guppy-protocol"
 version = "0.1.1"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "An implementation of the Guppy protocol v0.4.4 (guppy://): async UDP client and server with chunking, acknowledgement, and retransmission, plus a CLI. The smolweb-over-UDP protocol."

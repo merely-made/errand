@@ -2,7 +2,8 @@
 name = "kepler-protocol"
 version = "0.1.0"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "An implementation of the Kepler protocol (kepler:// and keplers://): async client and wire grammar. Gemini's shape plus the small web's only cache model, with declared body lengths, last-updated and expiry, and language negotiation."

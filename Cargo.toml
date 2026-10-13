@@ -25,4 +25,5 @@ members = [
 # counts: `time` (through misfin's TLS lane) declares 1.88 itself, and the
 # protocol crates use let-chains, stabilized in 1.88. 1.85, the edition-2024
 # floor, was tried first and fails on all four crates.
-rust-version = "1.88"
+
+rust-version = "1.97.1"

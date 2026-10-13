@@ -2,7 +2,8 @@
 name = "fsp-protocol"
 version = "0.1.0"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "An implementation of the FSP protocol (File Service Protocol, fsp://): async UDP client and v2 wire format. Anonymous file transfer simple enough for embedded devices, with its own sequencing and checksums."

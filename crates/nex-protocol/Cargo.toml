@@ -2,7 +2,8 @@
 name = "nex-protocol"
 version = "0.1.1"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "An implementation of the Nex protocol (nex://): async client, directory-serving server, listing parser, and a CLI. The minimal smolweb protocol — plaintext TCP, no TLS, no status codes."

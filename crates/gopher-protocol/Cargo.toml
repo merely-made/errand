@@ -2,7 +2,8 @@
 name = "gopher-protocol"
 version = "0.2.0"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "An implementation of the Gopher protocol (gopher://) and its Gopher+ successor: async client, RFC 1436 menu parser with RFC 4266 URLs, and Gopher+ attribute blocks, alternate views, and ASK forms. The parser half has no dependencies."

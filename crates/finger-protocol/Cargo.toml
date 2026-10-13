@@ -2,7 +2,8 @@
 name = "finger-protocol"
 version = "0.1.1"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "An implementation of the Finger protocol (finger://, RFC 1288) and its WebFinger successor (RFC 7033): async finger client, plus WebFinger request construction and JRD parsing. The oldest way to ask who someone is."

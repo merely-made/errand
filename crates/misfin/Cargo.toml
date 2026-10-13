@@ -2,7 +2,8 @@
 name = "misfin"
 version = "0.0.4"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "An embeddable implementation of the Misfin mail protocol: identities, gemmail, a sending client, and a receive server. Not the reference implementation — the protocol is lem's (misfin.org)."

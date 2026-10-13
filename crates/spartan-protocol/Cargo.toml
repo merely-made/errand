@@ -2,7 +2,8 @@
 name = "spartan-protocol"
 version = "0.1.1"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "A spec-faithful implementation of the Spartan protocol (spartan://): async client, server with a handler seam, static file serving, and a CLI. Plaintext smolweb with uploads via the =: prompt."

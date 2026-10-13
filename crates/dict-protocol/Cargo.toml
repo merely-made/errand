@@ -2,7 +2,8 @@
 name = "dict-protocol"
 version = "0.1.0"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "An implementation of the DICT protocol (RFC 2229, dict://): async session client and wire grammar. Look words up in networked dictionaries, with quoted parameters and dot-stuffed text blocks handled."

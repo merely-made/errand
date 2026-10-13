@@ -2,7 +2,8 @@
 name = "gemini-protocol"
 version = "0.1.7"
 edition = "2024"
-rust-version.workspace = true
+
+rust-version = "1.97.1"
 license = "MIT"
 repository = "https://github.com/merely-made/smolweb"
 description = "An implementation of the Gemini protocol (gemini://) and the formats and companions defined with it: the gemtext document grammar, real trust-on-first-use TLS pinning, and titan:// upload. The gemtext parser has no dependencies, and the protocol runs over any stream."
