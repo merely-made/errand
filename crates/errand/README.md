@@ -3,9 +3,8 @@
 
 Async smolweb transport in one scheme-routed call.
 
-> **Home:** [`merely-made/genet`](https://github.com/merely-made/genet), at
-> `components/errand` (adopted 2026-07). The former standalone repository is archived
-> and links here.
+> **Home:** [`merely-made/errand`](https://github.com/merely-made/errand),
+> alongside the protocol crates in the continuing Smolweb repository.
 
 The spec-faithful protocol crates ([`nex-protocol`](https://crates.io/crates/nex-protocol),
 [`spartan-protocol`](https://crates.io/crates/spartan-protocol),

@@ -1,29 +1,155 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/misfin",
-    "crates/spartan-protocol",
-    "crates/nex-protocol",
-    "crates/guppy-protocol",
-    "crates/gopher-protocol",
-    "crates/finger-protocol",
-    "crates/gemini-protocol",
-    "crates/kepler-protocol",
     "crates/dict-protocol",
+    "crates/errand",
+    "crates/finger-protocol",
     "crates/fsp-protocol",
-    "crates/scroll-protocol",
-    "crates/text-protocol",
+    "crates/gemini-protocol",
+    "crates/gopher-protocol",
+    "crates/guppy-protocol",
+    "crates/kepler-protocol",
+    "crates/misfin",
+    "crates/nex-protocol",
     "crates/scorpion-protocol",
+    "crates/scroll-protocol",
+    "crates/spartan-protocol",
+    "crates/text-protocol",
 ]
 
 [workspace.package]
-# Minimum supported Rust version. These crates are meant to be depended on by
-# people outside this workspace, so the number is a promise and CI holds it:
-# the `msrv` job builds and tests the whole workspace on exactly this toolchain.
-#
-# 1.88 is measured, not chosen. Below it the build fails on two independent
-# counts: `time` (through misfin's TLS lane) declares 1.88 itself, and the
-# protocol crates use let-chains, stabilized in 1.88. 1.85, the edition-2024
-# floor, was tried first and fails on all four crates.
-
 rust-version = "1.97.1"
+version = "0.0.1"
+edition = "2024"
+license = "MPL-2.0"
+repository = "https://github.com/merely-made/errand"
+authors = [
+    "Mark AB (markik)",
+]
+
+[workspace.dependencies.guppy-protocol]
+version = "=0.1.1"
+path = "crates/guppy-protocol"
+
+[workspace.dependencies.spartan-protocol]
+version = "=0.1.1"
+path = "crates/spartan-protocol"
+
+[workspace.dependencies.nex-protocol]
+version = "=0.1.1"
+path = "crates/nex-protocol"
+
+[workspace.dependencies.gopher-protocol]
+version = "=0.2.0"
+path = "crates/gopher-protocol"
+
+[workspace.dependencies.finger-protocol]
+version = "=0.1.1"
+default-features = false
+path = "crates/finger-protocol"
+features = [
+    "client",
+]
+
+[workspace.dependencies.gemini-protocol]
+version = "=0.1.7"
+path = "crates/gemini-protocol"
+
+[workspace.dependencies.scroll-protocol]
+version = "=0.1.0"
+path = "crates/scroll-protocol"
+
+[workspace.dependencies.misfin]
+version = "0.0.4"
+default-features = false
+path = "crates/misfin"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+all = "warn"
+
+[patch."https://github.com/merely-made/errand.git".errand]
+path = "crates/errand"
+
+[patch."https://github.com/merely-made/errand.git".dict-protocol]
+path = "crates/dict-protocol"
+
+[patch."https://github.com/merely-made/errand.git".finger-protocol]
+path = "crates/finger-protocol"
+
+[patch."https://github.com/merely-made/errand.git".fsp-protocol]
+path = "crates/fsp-protocol"
+
+[patch."https://github.com/merely-made/errand.git".gemini-protocol]
+path = "crates/gemini-protocol"
+
+[patch."https://github.com/merely-made/errand.git".gopher-protocol]
+path = "crates/gopher-protocol"
+
+[patch."https://github.com/merely-made/errand.git".guppy-protocol]
+path = "crates/guppy-protocol"
+
+[patch."https://github.com/merely-made/errand.git".kepler-protocol]
+path = "crates/kepler-protocol"
+
+[patch."https://github.com/merely-made/errand.git".misfin]
+path = "crates/misfin"
+
+[patch."https://github.com/merely-made/errand.git".nex-protocol]
+path = "crates/nex-protocol"
+
+[patch."https://github.com/merely-made/errand.git".scorpion-protocol]
+path = "crates/scorpion-protocol"
+
+[patch."https://github.com/merely-made/errand.git".scroll-protocol]
+path = "crates/scroll-protocol"
+
+[patch."https://github.com/merely-made/errand.git".spartan-protocol]
+path = "crates/spartan-protocol"
+
+[patch."https://github.com/merely-made/errand.git".text-protocol]
+path = "crates/text-protocol"
+
+[patch.crates-io.errand]
+path = "crates/errand"
+
+[patch.crates-io.dict-protocol]
+path = "crates/dict-protocol"
+
+[patch.crates-io.finger-protocol]
+path = "crates/finger-protocol"
+
+[patch.crates-io.fsp-protocol]
+path = "crates/fsp-protocol"
+
+[patch.crates-io.gemini-protocol]
+path = "crates/gemini-protocol"
+
+[patch.crates-io.gopher-protocol]
+path = "crates/gopher-protocol"
+
+[patch.crates-io.guppy-protocol]
+path = "crates/guppy-protocol"
+
+[patch.crates-io.kepler-protocol]
+path = "crates/kepler-protocol"
+
+[patch.crates-io.misfin]
+path = "crates/misfin"
+
+[patch.crates-io.nex-protocol]
+path = "crates/nex-protocol"
+
+[patch.crates-io.scorpion-protocol]
+path = "crates/scorpion-protocol"
+
+[patch.crates-io.scroll-protocol]
+path = "crates/scroll-protocol"
+
+[patch.crates-io.spartan-protocol]
+path = "crates/spartan-protocol"
+
+[patch.crates-io.text-protocol]
+path = "crates/text-protocol"

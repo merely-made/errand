@@ -1,4 +1,11 @@
+# Workspace toolchain. document-host depends on wasmtime 45 (rustc >= 1.93; the
+# DocumentScript substrate plan §11.7-1 decision), and a dependency in the graph now
+# requires rustc >= 1.95, so the floor moved up. The channel below sits above the
+# bare minimum on purpose: there is no reason to hold a release behind the floor.
+# The wasm32-wasip2 target is for the document-core guest crates (built per-crate).
 [toolchain]
 channel = "1.99.1"
-profile = "minimal"
-components = ["rustfmt", "clippy"]
+# wasm32-unknown-unknown carries the browser half of the WebRTC carrier
+# (Murm native/crates/webrtc-carrier); its C0 receipt is a dual-target build, which
+# only reproduces on a fresh clone if the target is declared here.
+targets = ["wasm32-wasip2", "wasm32-unknown-unknown"]
