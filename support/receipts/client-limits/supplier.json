@@ -1,0 +1,99 @@
+{
+  "schema": "client-limits-qualification-v1",
+  "owner": "errand",
+  "date": "2026-10-22",
+  "qualified_source": "1155897e6debc61102ea219cced245d0abccb658",
+  "errand_tree": "86c4721f524feddf24964b93cee4cc6981d1bd84",
+  "native_lock_sha256": "b6762246325286fc7d1467c50a87b4c40dc9dc9f2208eb544594c335ae4b9b0e",
+  "lock_delta": "Only existing rcgen0.13 test dependency edge added to Errand; registry packages unchanged",
+  "target": "C:\\t\\cargo-targets\\smolweb",
+  "build_dir": "C:\\t\\cargo-targets\\smolweb\\build",
+  "commands": [
+    {
+      "command": "cargo test --locked --offline -p errand -p gemini-protocol -p scroll-protocol -p gopher-protocol -p finger-protocol -p nex-protocol -p spartan-protocol -p guppy-protocol --all-features --lib --tests --quiet",
+      "exit_code": 0,
+      "passed": 254,
+      "ignored": 1,
+      "ignored_scope": "Existing live Nex network test",
+      "by_target": {
+        "errand": 64,
+        "client_limits": 14,
+        "finger": 17,
+        "gemini": 46,
+        "gopher": 41,
+        "guppy": 11,
+        "nex": 6,
+        "scroll": 43,
+        "spartan": 12
+      }
+    },
+    {
+      "command": "cargo check --locked --offline -p gemini-protocol -p scroll-protocol -p gopher-protocol -p finger-protocol --no-default-features --message-format short",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo check --locked --offline -p gemini-protocol -p scroll-protocol -p gopher-protocol -p finger-protocol --no-default-features --features gemini-protocol/client,scroll-protocol/client,gopher-protocol/client,finger-protocol/client --message-format short",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo clippy --locked --offline -p errand -p gemini-protocol -p scroll-protocol -p gopher-protocol -p finger-protocol -p nex-protocol -p spartan-protocol -p guppy-protocol --all-features --all-targets --message-format short -- -D warnings",
+      "exit_code": 101,
+      "baseline_diagnostics": [
+        "feed.rs:218",
+        "feed.rs:371",
+        "feed.rs:399",
+        "feed.rs:409",
+        "feed.rs:412",
+        "parse/nex.rs:77"
+      ]
+    },
+    {
+      "command": "cargo clippy --locked --offline -p errand -p gemini-protocol -p scroll-protocol -p gopher-protocol -p finger-protocol -p nex-protocol -p spartan-protocol -p guppy-protocol --all-features --all-targets --message-format short -- -D warnings -A clippy::collapsible_if -A clippy::collapsible_match",
+      "exit_code": 0
+    }
+  ],
+  "route_evidence": {
+    "tcp": [
+      "gopher",
+      "finger",
+      "nex",
+      "spartan"
+    ],
+    "udp": [
+      "guppy"
+    ],
+    "tls": [
+      "gemini",
+      "scroll",
+      "titan"
+    ],
+    "supplied_stream": [
+      "Gemini streaming before-callback cap",
+      "long Scroll metadata"
+    ]
+  },
+  "review_fixes": [
+    "preserve native16MiB convenience defaults versus facade64MiB policy",
+    "Gopher+ preflight borrowed token sizing",
+    "legacy Titan zero-response budget refuses before connection",
+    "legacy large explicit uploads retain body plus line allowance"
+  ],
+  "scope": [
+    "request bytes include CRLF and explicit payload",
+    "header line bytes include CRLF; native protocol ceilings retained",
+    "overflow refuses before append or callback",
+    "whole transaction deadline includes DNS/connect/TLS",
+    "feature checks use four packages per Cargo invocation with normal feature unification"
+  ],
+  "unqualified": [
+    "aggregate browser memory or traffic budget",
+    "generic actor task-count cap",
+    "standalone DICT/FSP/Kepler/Text session contracts",
+    "Scorpion whole-session deadline",
+    "Misfin whole-send deadline",
+    "headed UI",
+    "physical radio",
+    "independent readers"
+  ],
+  "receipt_byte_convention": "UTF-8 JSON, -text attribute; Git and native receipt bytes identical"
+}

@@ -110,6 +110,14 @@ receipts. New receipt hashes must state their Git/native byte convention.
   limits cases with and without compression and strict production Clippy;
   broader preliminary native evidence is separately identified. Primary I2P
   work was preserved locally and kept out of the published supplier cohort.
+- 2026-10-22: final committed Errand source `1155897e` passes the complete
+  254-case matrix with one existing live-network ignore. The [supplier receipt](../../support/receipts/client-limits/supplier.json)
+  records per-route TCP/UDP/TLS evidence, feature graphs and command identities.
+  Strict Clippy fails only on six unchanged parser style diagnostics; the same
+  all-target gate passes with the two named baseline lint allowances. This is
+  qualified Clippy evidence, not a blanket strict pass. The [Scorpion receipt](../../support/receipts/client-limits/scorpion.json)
+  retains its separate strict/native result. Response limits do not introduce
+  aggregate browser traffic/memory budgets or cap the fetch actor's task count.
 
 - 2026-10-22: refreshed current remotes and inspected related owner plans.
   Completed read-only research lanes before assigning bounded implementation
