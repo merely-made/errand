@@ -18,10 +18,17 @@ use crate::gemini::map_error;
 use crate::{Error, Response};
 
 /// Navigate to a `titan://` URL by sending a zero-byte upload.
-pub(crate) async fn fetch(url: &Url) -> Result<Response, Error> {
-    let response = gemini_protocol::titan::fetch(url)
-        .await
-        .map_err(map_error)?;
+pub(crate) async fn fetch(url: &Url, options: &crate::FetchOptions) -> Result<Response, Error> {
+    let response = gemini_protocol::titan::upload_with_fetch_options(
+        url,
+        &[],
+        "",
+        None,
+        None,
+        &crate::gemini::native_options(options),
+    )
+    .await
+    .map_err(map_error)?;
     Ok(crate::gemini::into_errand_response(url, response))
 }
 
@@ -50,5 +57,47 @@ pub async fn upload_with_identity(
     let response = gemini_protocol::titan::upload_with_identity(url, body, mime, token, identity)
         .await
         .map_err(map_error)?;
+    Ok(crate::gemini::into_errand_response(url, response))
+}
+
+/// Explicit upload with caller-owned bounds.
+pub async fn upload_with_options(
+    url: &Url,
+    body: &[u8],
+    mime: &str,
+    token: Option<&str>,
+    options: &crate::FetchOptions,
+) -> Result<Response, Error> {
+    upload_bounded(url, body, mime, token, None, options).await
+}
+/// Explicit upload with caller identity and bounds.
+pub async fn upload_with_identity_and_options(
+    url: &Url,
+    body: &[u8],
+    mime: &str,
+    token: Option<&str>,
+    identity: crate::GeminiClientIdentity<'_>,
+    options: &crate::FetchOptions,
+) -> Result<Response, Error> {
+    upload_bounded(url, body, mime, token, Some(identity), options).await
+}
+async fn upload_bounded(
+    url: &Url,
+    body: &[u8],
+    mime: &str,
+    token: Option<&str>,
+    identity: Option<crate::GeminiClientIdentity<'_>>,
+    options: &crate::FetchOptions,
+) -> Result<Response, Error> {
+    let response = gemini_protocol::titan::upload_with_fetch_options(
+        url,
+        body,
+        mime,
+        token,
+        identity,
+        &crate::gemini::native_options(options),
+    )
+    .await
+    .map_err(map_error)?;
     Ok(crate::gemini::into_errand_response(url, response))
 }

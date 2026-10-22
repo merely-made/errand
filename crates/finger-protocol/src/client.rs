@@ -24,6 +24,26 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use url::Url;
 
+/// Caller-owned bounds for one complete exchange, including connection setup.
+/// Byte budgets include CRLF for request/header lines; body bytes are separate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FetchOptions {
+    pub timeout: std::time::Duration,
+    pub max_request_bytes: usize,
+    pub max_header_line_bytes: usize,
+    pub max_body_bytes: usize,
+}
+impl Default for FetchOptions {
+    fn default() -> Self {
+        Self {
+            timeout: std::time::Duration::from_secs(30),
+            max_request_bytes: 4096,
+            max_header_line_bytes: 4096,
+            max_body_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
+
 /// Finger's well-known port.
 pub const DEFAULT_PORT: u16 = 79;
 
@@ -36,6 +56,10 @@ pub enum ClientError {
     Connect(String),
     /// A read or write failed mid-exchange.
     Io(String),
+    /// The whole exchange deadline expired.
+    Timeout,
+    /// A configured byte budget was exceeded.
+    Protocol(String),
 }
 
 impl std::fmt::Display for ClientError {
@@ -44,6 +68,8 @@ impl std::fmt::Display for ClientError {
             Self::BadUrl(m) => write!(f, "bad url: {m}"),
             Self::Connect(m) => write!(f, "connect: {m}"),
             Self::Io(m) => write!(f, "io: {m}"),
+            Self::Timeout => write!(f, "exchange timed out"),
+            Self::Protocol(m) => write!(f, "protocol: {m}"),
         }
     }
 }
@@ -71,29 +97,94 @@ impl Response {
 /// Both `finger://host/user` and `finger://user@host` name a user; a bare
 /// `finger://host/` asks for the listing.
 pub async fn fetch(url: &str) -> Result<Response, ClientError> {
+    fetch_with_options(url, &FetchOptions::default()).await
+}
+
+/// Fetch with a whole deadline and request/body bounds.
+pub async fn fetch_with_options(
+    url: &str,
+    options: &FetchOptions,
+) -> Result<Response, ClientError> {
     let url = Url::parse(url).map_err(|e| ClientError::BadUrl(e.to_string()))?;
     let host = url
         .host_str()
         .ok_or_else(|| ClientError::BadUrl("finger URL has no host".into()))?;
     let port = url.port().unwrap_or(DEFAULT_PORT);
-    query(host, port, &query_from_url(&url)).await
+    let user = if url.path().trim_start_matches('/').is_empty() {
+        url.username()
+    } else {
+        url.path().trim_start_matches('/')
+    };
+    if user.len().saturating_add(2) > options.max_request_bytes {
+        return Err(ClientError::Protocol(
+            "request exceeds configured limit".into(),
+        ));
+    }
+    query_with_options(host, port, &query_from_url(&url), options).await
 }
 
 /// Run a finger query against a host directly.
 pub async fn query(host: &str, port: u16, request: &Query) -> Result<Response, ClientError> {
-    let mut stream = TcpStream::connect((host, port))
-        .await
-        .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
-    stream
-        .write_all(request.wire().as_bytes())
-        .await
-        .map_err(|e| ClientError::Io(e.to_string()))?;
-    let mut body = Vec::new();
-    stream
-        .read_to_end(&mut body)
-        .await
-        .map_err(|e| ClientError::Io(e.to_string()))?;
-    Ok(Response { body })
+    query_with_options(host, port, request, &FetchOptions::default()).await
+}
+
+/// Query with caller bounds. Finger has no response header.
+pub async fn query_with_options(
+    host: &str,
+    port: u16,
+    request: &Query,
+    options: &FetchOptions,
+) -> Result<Response, ClientError> {
+    tokio::time::timeout(options.timeout, async {
+        let size = request
+            .user
+            .as_ref()
+            .map_or(0, String::len)
+            .saturating_add(if request.verbose {
+                2 + usize::from(request.user.as_deref().is_some_and(|user| !user.is_empty()))
+            } else {
+                0
+            })
+            .saturating_add(2);
+        if size > options.max_request_bytes {
+            return Err(ClientError::Protocol(
+                "request exceeds configured limit".into(),
+            ));
+        }
+        let wire = request.wire();
+        if wire.len() > options.max_request_bytes {
+            return Err(ClientError::Protocol(
+                "request exceeds configured limit".into(),
+            ));
+        }
+        let mut stream = TcpStream::connect((host, port))
+            .await
+            .map_err(|e| ClientError::Connect(e.to_string()))?;
+        stream
+            .write_all(wire.as_bytes())
+            .await
+            .map_err(|e| ClientError::Io(e.to_string()))?;
+        let mut body = Vec::new();
+        let mut chunk = [0; 8192];
+        loop {
+            let count = stream
+                .read(&mut chunk)
+                .await
+                .map_err(|e| ClientError::Io(e.to_string()))?;
+            if count == 0 {
+                break;
+            }
+            if count > options.max_body_bytes.saturating_sub(body.len()) {
+                return Err(ClientError::Protocol(
+                    "body exceeds configured limit".into(),
+                ));
+            }
+            body.extend_from_slice(&chunk[..count]);
+        }
+        Ok(Response { body })
+    })
+    .await
+    .map_err(|_| ClientError::Timeout)?
 }
 
 /// The user a finger URL names: the path if present, else the userinfo, else
@@ -123,7 +214,10 @@ mod tests {
 
     #[test]
     fn user_from_path_or_userinfo_or_listing() {
-        assert_eq!(target("finger://example.org/alice").as_deref(), Some("alice"));
+        assert_eq!(
+            target("finger://example.org/alice").as_deref(),
+            Some("alice")
+        );
         assert_eq!(target("finger://bob@example.org").as_deref(), Some("bob"));
         assert_eq!(target("finger://example.org/"), None);
     }

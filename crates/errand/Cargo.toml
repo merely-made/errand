@@ -100,3 +100,6 @@ features = [
     "io-util",
     "sync",
 ]
+
+[dev-dependencies.rcgen]
+version = "0.13"

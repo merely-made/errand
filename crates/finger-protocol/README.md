@@ -56,3 +56,14 @@ Both `finger://host/user` and `finger://user@host` name a user; a bare
 ## License
 
 MIT.
+
+## Client bounds
+
+Client operations have a 30-second whole-operation deadline, including connection
+setup, and a 64 MiB response-body default. Overflow returns an error rather than
+a truncated success. Bounds are enforced before body append. No runtime is added to the dependency-free grammar feature.
+
+`client::FetchOptions` supplies `timeout`, `max_request_bytes`,
+`max_header_line_bytes`, and `max_body_bytes`. `fetch_with_options` and
+`query_with_options` retain the native Query API. Requests default to 4096 wire
+bytes including CRLF; Finger has no response header and ignores that setting.

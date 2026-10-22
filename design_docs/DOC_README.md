@@ -5,3 +5,4 @@ Preserve host-owned authority, existing formats and independent crate feature bo
 Canonical migration and current receipts: `mere/design_docs/mere_docs/implementation_strategy/2026-10-19_family_promotion_plan.md`.
 
 - [Native Scroll response and connection exchange](implementation_strategy/2026-10-21_native_scroll_server_plan.md): bounded native reply encoding and an optional host-owned stream exchange, with Knot as the existing consumer.
+- [Client receive limits](implementation_strategy/2026-10-22_client_limits_plan.md): caller-owned budgets across routed clients, native Micron Resources and browser consumers; standalone protocol follow-ups remain explicit.

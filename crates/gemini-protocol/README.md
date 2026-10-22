@@ -53,11 +53,27 @@ does not.
 
 ## Known gap
 
-Client certificates are recognised but not answerable, on **both** sides: a
-`6x` response parses correctly and reports itself, but the client cannot
-present a certificate and the server does not request one. The `6x` path is a
-thing you can say and not a thing you can complete.
+The client can present a caller-selected identity and retains `6x` status facts.
+The built-in server acceptor does not request client certificates; selecting
+server authentication policy remains a separate hosting concern.
 
 ## License
 
 MIT.
+
+## Client bounds
+
+Client operations have a 30-second whole-operation deadline, including connection
+setup, and a 64 MiB response-body default. Overflow returns an error rather than
+a truncated success. Bounds are enforced before body append (and before a Gemini
+streaming callback). No runtime is added to the dependency-free grammar feature.
+
+`client::FetchOptions` supplies `timeout`, `max_request_bytes`,
+`max_header_line_bytes`, and `max_body_bytes`. `exchange_with_options`,
+`exchange_streaming_with_options`, `client::fetch_url_with_options`, and
+`client::fetch_url_streaming_with_options` retain native response and identity
+types. Native request/header ceilings remain 1024 bytes including CRLF. Titan
+`upload_with_fetch_options` also accepts these bounds; its request budget includes
+the payload. Legacy Titan upload helpers allow the caller-owned payload plus the
+native line allowance and retain their existing 16 MiB response default, plus
+the whole-operation deadline.

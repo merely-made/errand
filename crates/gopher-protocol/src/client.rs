@@ -20,7 +20,7 @@
 //! # }
 //! ```
 
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use url::Url;
 
@@ -31,12 +31,31 @@ use crate::plus::{AttributeBlock, MalformedHeader, PlusHeader, parse_attributes,
 // not client machinery, and the server needs it too.
 pub use crate::plus::PlusRequest;
 
+/// Caller-owned bounds for one complete exchange, including connection setup.
+/// Byte budgets include CRLF for request/header lines; body bytes are separate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FetchOptions {
+    pub timeout: std::time::Duration,
+    pub max_request_bytes: usize,
+    pub max_header_line_bytes: usize,
+    pub max_body_bytes: usize,
+}
+impl Default for FetchOptions {
+    fn default() -> Self {
+        Self {
+            timeout: std::time::Duration::from_secs(30),
+            max_request_bytes: 4096,
+            max_header_line_bytes: 4096,
+            max_body_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
+
 /// Gopher's well-known port.
 pub const DEFAULT_PORT: u16 = 70;
 
-/// What can go wrong fetching a gopher resource. There is no protocol-error
-/// variant because gopher has no status line: a server that dislikes a request
-/// answers with an error *item* inside an ordinary menu body.
+/// What can go wrong fetching a gopher resource. Server refusals remain error
+/// items in the native menu body; `Protocol` reports local byte-budget failures.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientError {
     /// The URL could not be parsed, or it lacks a host.
@@ -45,6 +64,10 @@ pub enum ClientError {
     Connect(String),
     /// A read or write failed mid-exchange.
     Io(String),
+    /// The whole exchange deadline expired.
+    Timeout,
+    /// A configured byte budget was exceeded.
+    Protocol(String),
     /// A Gopher+ reply did not begin with a well-formed header. Only Gopher+
     /// transactions can produce this; plain RFC 1436 replies have no header.
     BadPlusHeader(String),
@@ -64,6 +87,8 @@ impl std::fmt::Display for ClientError {
             Self::BadUrl(m) => write!(f, "bad url: {m}"),
             Self::Connect(m) => write!(f, "connect: {m}"),
             Self::Io(m) => write!(f, "io: {m}"),
+            Self::Timeout => write!(f, "exchange timed out"),
+            Self::Protocol(m) => write!(f, "protocol: {m}"),
             Self::BadPlusHeader(m) => write!(f, "malformed gopher+ header: {m}"),
             Self::PlusError(m) => write!(f, "gopher+ error: {m}"),
         }
@@ -88,26 +113,56 @@ pub struct Response {
 /// The URL is taken as a string so this signature does not carry a `url`
 /// major version into the public API.
 pub async fn fetch(url: &str) -> Result<Response, ClientError> {
-    let url = Url::parse(url).map_err(|e| ClientError::BadUrl(e.to_string()))?;
-    let host = url
-        .host_str()
-        .ok_or_else(|| ClientError::BadUrl("gopher URL has no host".into()))?;
-    let port = url.port().unwrap_or(DEFAULT_PORT);
-    let (item_type, selector) = split_path(&url);
+    fetch_with_options(url, &FetchOptions::default()).await
+}
 
-    let mut request = selector;
-    // A type-7 item is a search server: the query rides after a TAB.
-    if let Some(query) = url.query() {
-        request.push('\t');
-        request.push_str(query);
-    }
-    request.push_str("\r\n");
+/// Fetch with a whole deadline and caller request/body budgets.
+pub async fn fetch_with_options(
+    url: &str,
+    options: &FetchOptions,
+) -> Result<Response, ClientError> {
+    tokio::time::timeout(options.timeout, async {
+        let url = Url::parse(url).map_err(|e| ClientError::BadUrl(e.to_string()))?;
+        let host = url
+            .host_str()
+            .ok_or_else(|| ClientError::BadUrl("gopher URL has no host".into()))?;
+        let port = url.port().unwrap_or(DEFAULT_PORT);
+        let path = url.path().strip_prefix('/').unwrap_or(url.path());
+        let selector_len = path
+            .len()
+            .saturating_sub(path.chars().next().map_or(0, char::len_utf8));
+        if selector_len > options.max_request_bytes {
+            return Err(ClientError::Protocol(
+                "request exceeds configured limit".into(),
+            ));
+        }
+        let (item_type, selector) = split_path(&url);
 
-    let body = exchange(&url, host, port, request.as_bytes()).await?;
-    Ok(Response {
-        mime: mime_for_item_type(item_type).to_string(),
-        body,
+        let size = selector
+            .len()
+            .saturating_add(url.query().map_or(0, |q| q.len().saturating_add(1)))
+            .saturating_add(2);
+        if size > options.max_request_bytes {
+            return Err(ClientError::Protocol(
+                "request exceeds configured limit".into(),
+            ));
+        }
+        let mut request = selector;
+        // A type-7 item is a search server: the query rides after a TAB.
+        if let Some(query) = url.query() {
+            request.push('\t');
+            request.push_str(query);
+        }
+        request.push_str("\r\n");
+
+        let body = exchange(&url, host, port, request.as_bytes(), options).await?;
+        Ok(Response {
+            mime: mime_for_item_type(item_type).to_string(),
+            body,
+        })
     })
+    .await
+    .map_err(|_| ClientError::Timeout)?
 }
 
 /// Open a connection (plaintext for `gopher://`, TLS for `gophers://`), send
@@ -118,12 +173,18 @@ async fn exchange(
     host: &str,
     port: u16,
     request: &[u8],
+    options: &FetchOptions,
 ) -> Result<Vec<u8>, ClientError> {
+    if request.len() > options.max_request_bytes {
+        return Err(ClientError::Protocol(
+            "request exceeds configured limit".into(),
+        ));
+    }
     if url.scheme() == "gophers" {
         #[cfg(feature = "tls")]
         {
             let mut stream = crate::tls::connect(host, port).await?;
-            return send_and_read(&mut stream, request).await;
+            return send_and_read(&mut stream, request, options).await;
         }
         #[cfg(not(feature = "tls"))]
         {
@@ -137,11 +198,15 @@ async fn exchange(
     let mut stream = TcpStream::connect((host, port))
         .await
         .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
-    send_and_read(&mut stream, request).await
+    send_and_read(&mut stream, request, options).await
 }
 
 /// Send a request over an already-connected stream and read the reply to EOF.
-async fn send_and_read<S>(stream: &mut S, request: &[u8]) -> Result<Vec<u8>, ClientError>
+async fn send_and_read<S>(
+    stream: &mut S,
+    request: &[u8],
+    options: &FetchOptions,
+) -> Result<Vec<u8>, ClientError>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -149,12 +214,24 @@ where
         .write_all(request)
         .await
         .map_err(|e| ClientError::Io(e.to_string()))?;
-    let mut buf = Vec::new();
-    stream
-        .read_to_end(&mut buf)
-        .await
-        .map_err(|e| ClientError::Io(e.to_string()))?;
-    Ok(buf)
+    let mut body = Vec::new();
+    let mut chunk = [0; 8192];
+    loop {
+        let count = stream
+            .read(&mut chunk)
+            .await
+            .map_err(|e| ClientError::Io(e.to_string()))?;
+        if count == 0 {
+            break;
+        }
+        if count > options.max_body_bytes.saturating_sub(body.len()) {
+            return Err(ClientError::Protocol(
+                "body exceeds configured limit".into(),
+            ));
+        }
+        body.extend_from_slice(&chunk[..count]);
+    }
+    Ok(body)
 }
 
 /// Split a gopher path into its item-type character and selector. An empty path
@@ -202,34 +279,87 @@ pub struct PlusReply {
 /// `selector <TAB> search <TAB> token`. The search field is present but empty
 /// for a non-search item, which is why the spec's own examples show two tabs.
 pub async fn fetch_plus(url: &str, request: PlusRequest) -> Result<PlusReply, ClientError> {
-    let url = Url::parse(url).map_err(|e| ClientError::BadUrl(e.to_string()))?;
-    let host = url
-        .host_str()
-        .ok_or_else(|| ClientError::BadUrl("gopher URL has no host".into()))?;
-    let port = url.port().unwrap_or(DEFAULT_PORT);
-    let (_, selector) = split_path(&url);
-    let search = url.query().unwrap_or("");
+    fetch_plus_with_options(url, request, &FetchOptions::default()).await
+}
 
-    let line = format!("{selector}\t{search}\t{}\r\n", request.token());
-    let (header, body) = plus_exchange(&url, host, port, line.as_bytes()).await?;
+/// Bounded Gopher+ transaction; native header/count semantics are preserved.
+pub async fn fetch_plus_with_options(
+    url: &str,
+    request: PlusRequest,
+    options: &FetchOptions,
+) -> Result<PlusReply, ClientError> {
+    tokio::time::timeout(options.timeout, async {
+        let url = Url::parse(url).map_err(|e| ClientError::BadUrl(e.to_string()))?;
+        let host = url
+            .host_str()
+            .ok_or_else(|| ClientError::BadUrl("gopher URL has no host".into()))?;
+        let port = url.port().unwrap_or(DEFAULT_PORT);
+        let path = url.path().strip_prefix('/').unwrap_or(url.path());
+        let selector_len = path
+            .len()
+            .saturating_sub(path.chars().next().map_or(0, char::len_utf8));
+        if selector_len > options.max_request_bytes {
+            return Err(ClientError::Protocol(
+                "request exceeds configured limit".into(),
+            ));
+        }
+        let (_, selector) = split_path(&url);
+        let search = url.query().unwrap_or("");
 
-    if header == PlusHeader::Error {
-        return Err(ClientError::PlusError(
-            String::from_utf8_lossy(&body).trim().to_string(),
-        ));
-    }
-    Ok(PlusReply { header, body })
+        let token_len = match &request {
+            PlusRequest::Item(Some(view)) => 1_usize.saturating_add(view.len()),
+            _ => 1,
+        };
+        let size = selector
+            .len()
+            .saturating_add(search.len())
+            .saturating_add(token_len)
+            .saturating_add(4);
+        if size > options.max_request_bytes {
+            return Err(ClientError::Protocol(
+                "request exceeds configured limit".into(),
+            ));
+        }
+        let token = request.token();
+        let line = format!("{selector}\t{search}\t{token}\r\n");
+        let (header, body) = plus_exchange(&url, host, port, line.as_bytes(), options).await?;
+
+        if header == PlusHeader::Error {
+            return Err(ClientError::PlusError(
+                String::from_utf8_lossy(&body).trim().to_string(),
+            ));
+        }
+        Ok(PlusReply { header, body })
+    })
+    .await
+    .map_err(|_| ClientError::Timeout)?
 }
 
 /// Fetch and parse an item's Gopher+ attribute blocks (`!`).
 pub async fn fetch_attributes(url: &str) -> Result<Vec<AttributeBlock>, ClientError> {
-    let reply = fetch_plus(url, PlusRequest::Attributes).await?;
+    fetch_attributes_with_options(url, &FetchOptions::default()).await
+}
+
+/// Attribute blocks with caller bounds.
+pub async fn fetch_attributes_with_options(
+    url: &str,
+    options: &FetchOptions,
+) -> Result<Vec<AttributeBlock>, ClientError> {
+    let reply = fetch_plus_with_options(url, PlusRequest::Attributes, options).await?;
     Ok(parse_attributes(&String::from_utf8_lossy(&reply.body)))
 }
 
 /// Fetch and parse the attribute blocks of every item in a directory (`$`).
 pub async fn fetch_directory_attributes(url: &str) -> Result<Vec<AttributeBlock>, ClientError> {
-    let reply = fetch_plus(url, PlusRequest::DirectoryAttributes).await?;
+    fetch_directory_attributes_with_options(url, &FetchOptions::default()).await
+}
+
+/// Directory attribute blocks with caller bounds.
+pub async fn fetch_directory_attributes_with_options(
+    url: &str,
+    options: &FetchOptions,
+) -> Result<Vec<AttributeBlock>, ClientError> {
+    let reply = fetch_plus_with_options(url, PlusRequest::DirectoryAttributes, options).await?;
     Ok(parse_attributes(&String::from_utf8_lossy(&reply.body)))
 }
 
@@ -240,12 +370,18 @@ async fn plus_exchange(
     host: &str,
     port: u16,
     request: &[u8],
+    options: &FetchOptions,
 ) -> Result<(PlusHeader, Vec<u8>), ClientError> {
+    if request.len() > options.max_request_bytes {
+        return Err(ClientError::Protocol(
+            "request exceeds configured limit".into(),
+        ));
+    }
     if url.scheme() == "gophers" {
         #[cfg(feature = "tls")]
         {
             let stream = crate::tls::connect(host, port).await?;
-            return plus_over(stream, request).await;
+            return plus_over(stream, request, options).await;
         }
         #[cfg(not(feature = "tls"))]
         {
@@ -257,11 +393,15 @@ async fn plus_exchange(
     let stream = TcpStream::connect((host, port))
         .await
         .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
-    plus_over(stream, request).await
+    plus_over(stream, request, options).await
 }
 
 /// The Gopher+ transaction over an already-connected stream.
-async fn plus_over<S>(mut stream: S, request: &[u8]) -> Result<(PlusHeader, Vec<u8>), ClientError>
+async fn plus_over<S>(
+    mut stream: S,
+    request: &[u8],
+    options: &FetchOptions,
+) -> Result<(PlusHeader, Vec<u8>), ClientError>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -270,36 +410,68 @@ where
         .await
         .map_err(|e| ClientError::Io(e.to_string()))?;
 
-    let mut reader = BufReader::new(stream);
-    let mut header_line = String::new();
-    reader
-        .read_line(&mut header_line)
-        .await
-        .map_err(|e| ClientError::Io(e.to_string()))?;
-    if header_line.is_empty() {
-        return Err(ClientError::BadPlusHeader(
-            "the server closed without a header".into(),
-        ));
+    let mut header_bytes = Vec::new();
+    loop {
+        let mut byte = [0];
+        if stream
+            .read(&mut byte)
+            .await
+            .map_err(|e| ClientError::Io(e.to_string()))?
+            == 0
+        {
+            return Err(ClientError::BadPlusHeader("unterminated header".into()));
+        }
+        if header_bytes.len() == options.max_header_line_bytes {
+            return Err(ClientError::Protocol(
+                "header exceeds configured limit".into(),
+            ));
+        }
+        header_bytes.push(byte[0]);
+        if byte[0] == b'\n' {
+            break;
+        }
     }
-    let header = parse_header(&header_line)?;
-
+    let header_line = std::str::from_utf8(&header_bytes)
+        .map_err(|_| ClientError::BadPlusHeader("header is not UTF-8".into()))?;
+    let header = parse_header(header_line)?;
     let mut body = Vec::new();
-    match header {
-        // `take` rather than a pre-sized allocation: the count comes from the
-        // server and a hostile one should not be able to ask for a huge Vec.
-        PlusHeader::Length(count) => {
-            reader
-                .take(count)
-                .read_to_end(&mut body)
+    if let PlusHeader::Length(count) = header {
+        if count > options.max_body_bytes as u64 {
+            return Err(ClientError::Protocol(
+                "body exceeds configured limit".into(),
+            ));
+        }
+        let mut remaining = count;
+        let mut chunk = [0; 8192];
+        while remaining != 0 {
+            let capacity = remaining.min(chunk.len() as u64) as usize;
+            let count = stream
+                .read(&mut chunk[..capacity])
                 .await
                 .map_err(|e| ClientError::Io(e.to_string()))?;
-        },
-        _ => {
-            reader
-                .read_to_end(&mut body)
+            if count == 0 {
+                return Err(ClientError::Protocol("truncated counted body".into()));
+            }
+            body.extend_from_slice(&chunk[..count]);
+            remaining -= count as u64;
+        }
+    } else {
+        let mut chunk = [0; 8192];
+        loop {
+            let count = stream
+                .read(&mut chunk)
                 .await
                 .map_err(|e| ClientError::Io(e.to_string()))?;
-        },
+            if count == 0 {
+                break;
+            }
+            if count > options.max_body_bytes.saturating_sub(body.len()) {
+                return Err(ClientError::Protocol(
+                    "body exceeds configured limit".into(),
+                ));
+            }
+            body.extend_from_slice(&chunk[..count]);
+        }
     }
 
     if matches!(header, PlusHeader::PeriodTerminated | PlusHeader::Error) {
@@ -318,7 +490,11 @@ fn strip_period_terminator(mut body: Vec<u8>) -> Vec<u8> {
         b"\n.".as_slice(),
     ] {
         if body.ends_with(terminator) {
-            let keep = if terminator.starts_with(b"\r\n") { 2 } else { 1 };
+            let keep = if terminator.starts_with(b"\r\n") {
+                2
+            } else {
+                1
+            };
             body.truncate(body.len() - terminator.len() + keep);
             return body;
         }
@@ -390,6 +566,57 @@ mod tests {
         assert_eq!(
             strip_period_terminator(b"see fig. 1.".to_vec()),
             b"see fig. 1.".to_vec()
+        );
+    }
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+    async fn plus(raw: &[u8], max: usize) -> Result<(PlusHeader, Vec<u8>), ClientError> {
+        let (client, mut server) = tokio::io::duplex(128);
+        let raw = raw.to_vec();
+        let server = tokio::spawn(async move {
+            let mut request = [0; 256];
+            let _ = server.read(&mut request).await.unwrap();
+            let _ = server.write_all(&raw).await;
+        });
+        let result = plus_over(
+            client,
+            b"/\t\t+\r\n",
+            &FetchOptions {
+                max_body_bytes: max,
+                ..Default::default()
+            },
+        )
+        .await;
+        server.await.unwrap();
+        result
+    }
+    #[tokio::test]
+    async fn counted_and_uncounted_plus_replies_have_exact_body_bounds() {
+        assert_eq!(plus(b"+4\r\nABCD", 4).await.unwrap().1, b"ABCD");
+        assert!(plus(b"+5\r\nABCDE", 4).await.is_err());
+        assert!(plus(b"+4\r\nABC", 4).await.is_err());
+        assert_eq!(plus(b"+-1\r\nABCD", 4).await.unwrap().1, b"ABCD");
+        assert!(plus(b"+-1\r\nABCDE", 4).await.is_err());
+    }
+    #[tokio::test]
+    async fn oversized_plus_representation_is_refused_before_connecting() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("gopher://{}/1/", listener.local_addr().unwrap());
+        let options = FetchOptions {
+            max_request_bytes: 8,
+            ..Default::default()
+        };
+        let error =
+            fetch_plus_with_options(&url, PlusRequest::Item(Some("x".repeat(8192))), &options)
+                .await
+                .unwrap_err();
+        assert!(matches!(error, ClientError::Protocol(_)));
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
         );
     }
 }

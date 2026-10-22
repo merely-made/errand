@@ -32,9 +32,9 @@ pub enum ClientError {
     Response(ResponseError),
     /// The URL could not be parsed, or named no host.
     Url(String),
-    /// The server declared a body larger than the caller allowed.
+    /// The server declared or sent a body larger than the caller allowed.
     BodyTooLarge {
-        /// What the server declared.
+        /// The declared length, or the minimum observed length for an unknown body.
         declared: u64,
         /// What the caller permitted.
         limit: u64,
@@ -56,7 +56,7 @@ impl std::fmt::Display for ClientError {
             Self::Url(detail) => write!(f, "scorpion: {detail}"),
             Self::BodyTooLarge { declared, limit } => write!(
                 f,
-                "scorpion: server declared {declared} bytes, over the {limit}-byte limit"
+                "scorpion: body requires at least {declared} bytes, over the {limit}-byte limit"
             ),
             Self::Truncated { declared, received } => write!(
                 f,
@@ -184,11 +184,16 @@ where
         // exactly, because a range running past the end of the file is
         // answered with what exists, which is fewer bytes than were asked for
         // and is not an error.
-        let cap = requested_range
-            .and_then(|range| range.len())
-            .unwrap_or(limits.max_body)
-            .min(limits.max_body);
-        read_to_end_capped(stream, cap).await?
+        match requested_range.and_then(|range| range.len()) {
+            Some(length) if length <= limits.max_body => {
+                // The range is a frame boundary: probing beyond it would eat
+                // the next status line on an interactive connection.
+                let mut body = Vec::new();
+                stream.take(length).read_to_end(&mut body).await?;
+                body
+            }
+            _ => read_to_end_capped(stream, limits.max_body).await?,
+        }
     } else {
         match declared {
             Size::Known(size) => {
@@ -198,7 +203,11 @@ where
                         limit: limits.max_body,
                     });
                 }
-                let mut body = vec![0u8; size as usize];
+                let length = usize::try_from(size).map_err(|_| ClientError::BodyTooLarge {
+                    declared: size,
+                    limit: usize::MAX as u64,
+                })?;
+                let mut body = vec![0u8; length];
                 match stream.read_exact(&mut body).await {
                     Ok(_) => body,
                     Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
@@ -206,10 +215,10 @@ where
                             declared: size,
                             received: 0,
                         });
-                    },
+                    }
                     Err(error) => return Err(error.into()),
                 }
-            },
+            }
             // The server does not know either, so end of stream is the end of
             // the file. The cap keeps a server that never stops from filling
             // memory.
@@ -226,9 +235,24 @@ where
     S: AsyncRead + Unpin,
 {
     let mut body = Vec::new();
-    let mut limited = stream.take(cap);
-    limited.read_to_end(&mut body).await?;
-    Ok(body)
+    let mut chunk = [0u8; 8192];
+    loop {
+        // One sentinel byte distinguishes exact-fit EOF from overflow. It is
+        // never appended, and a peer cannot force cap+1 body storage.
+        let remaining = cap.saturating_sub(body.len() as u64);
+        let count = remaining.saturating_add(1).min(chunk.len() as u64) as usize;
+        let read = stream.read(&mut chunk[..count]).await?;
+        if read == 0 {
+            return Ok(body);
+        }
+        if read as u64 > remaining {
+            return Err(ClientError::BodyTooLarge {
+                declared: (body.len() as u64).saturating_add(read as u64),
+                limit: cap,
+            });
+        }
+        body.extend_from_slice(&chunk[..read]);
+    }
 }
 
 /// Read one CRLF-terminated line, refusing anything over `max`.
@@ -257,8 +281,7 @@ where
     if line.last() == Some(&b'\r') {
         line.pop();
     }
-    String::from_utf8(line)
-        .map_err(|_| ClientError::Response(ResponseError::Malformed))
+    String::from_utf8(line).map_err(|_| ClientError::Response(ResponseError::Malformed))
 }
 
 /// Dial the host in `request`'s URL and run one exchange over plain TCP.
@@ -289,7 +312,10 @@ mod tests {
 
     /// Serve one canned response over an in-memory pipe and return what the
     /// client sent.
-    async fn round_trip(request: &Request, canned: &[u8]) -> (Vec<u8>, Result<Response, ClientError>) {
+    async fn round_trip(
+        request: &Request,
+        canned: &[u8],
+    ) -> (Vec<u8>, Result<Response, ClientError>) {
         let (mut client_side, mut server_side) = duplex(64 * 1024);
         let canned = canned.to_vec();
         let server = tokio::spawn(async move {
@@ -337,6 +363,56 @@ mod tests {
         )
         .await;
         assert_eq!(response.unwrap().text(), Some("generated on the fly"));
+    }
+
+    #[tokio::test]
+    async fn unknown_bodies_accept_exact_fit_and_refuse_the_next_byte() {
+        for (payload, cap, accepted) in [
+            (&b""[..], 0, true),
+            (&b"a"[..], 0, false),
+            (&b"abc"[..], 3, true),
+            (&b"abcd"[..], 3, false),
+        ] {
+            let mut wire = b"20 ? text/plain\r\n".to_vec();
+            wire.extend_from_slice(payload);
+            let response = read_response(
+                &mut wire.as_slice(),
+                Limits {
+                    max_body: cap,
+                    ..Limits::default()
+                },
+                None,
+            )
+            .await;
+            if accepted {
+                assert_eq!(response.unwrap().body, payload);
+            } else {
+                assert!(
+                    matches!(response, Err(ClientError::BodyTooLarge { limit, .. }) if limit == cap)
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn partial_response_refuses_policy_overflow_but_preserves_range_framing() {
+        let limits = Limits {
+            max_body: 3,
+            ..Limits::default()
+        };
+        let mut oversized = &b"21 100 text/plain\r\nabcd"[..];
+        assert!(matches!(
+            read_response(&mut oversized, limits, Some(Range::new(0, 10))).await,
+            Err(ClientError::BodyTooLarge { limit: 3, .. })
+        ));
+
+        // A following status line is not part of the requested three bytes.
+        let mut framed = &b"21 100 text/plain\r\nabc70 ready\r\n"[..];
+        let response = read_response(&mut framed, limits, Some(Range::new(0, 3)))
+            .await
+            .unwrap();
+        assert_eq!(response.body, b"abc");
+        assert_eq!(framed, b"70 ready\r\n");
     }
 
     #[tokio::test]
@@ -392,7 +468,10 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(matches!(error, ClientError::BodyTooLarge { limit: 1024, .. }));
+        assert!(matches!(
+            error,
+            ClientError::BodyTooLarge { limit: 1024, .. }
+        ));
     }
 
     #[tokio::test]

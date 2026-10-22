@@ -19,8 +19,8 @@ use url::Url;
 use crate::{Error, Response, Status};
 
 /// Fetch a `spartan://` URL.
-pub(crate) async fn fetch(url: &Url) -> Result<Response, Error> {
-    let response = spartan_protocol::fetch(url.as_str(), &Default::default())
+pub(crate) async fn fetch(url: &Url, options: &crate::FetchOptions) -> Result<Response, Error> {
+    let response = spartan_protocol::fetch(url.as_str(), &native_options(options))
         .await
         .map_err(map_error)?;
     Ok(map_response(url, response))
@@ -28,10 +28,32 @@ pub(crate) async fn fetch(url: &Url) -> Result<Response, Error> {
 
 /// Submit `body` as the data block requested by a Spartan `=:` prompt.
 pub async fn submit(url: &Url, body: &[u8]) -> Result<Response, Error> {
+    let defaults = crate::FetchOptions::default();
+    let max_request_bytes = body
+        .len()
+        .checked_add(defaults.max_request_bytes)
+        .ok_or_else(|| Error::Protocol("Spartan request size overflows".into()))?;
+    submit_with_options(
+        url,
+        body,
+        &crate::FetchOptions {
+            max_request_bytes,
+            ..defaults
+        },
+    )
+    .await
+}
+
+/// Explicit submission with caller-owned request and response bounds.
+pub async fn submit_with_options(
+    url: &Url,
+    body: &[u8],
+    options: &crate::FetchOptions,
+) -> Result<Response, Error> {
     if url.scheme() != "spartan" {
         return Err(Error::UnsupportedScheme(url.scheme().to_string()));
     }
-    let response = spartan_protocol::submit(url.as_str(), body, &Default::default())
+    let response = spartan_protocol::submit(url.as_str(), body, &native_options(options))
         .await
         .map_err(map_error)?;
     Ok(map_response(url, response))
@@ -62,7 +84,17 @@ fn map_error(error: spartan_protocol::ClientError) -> Error {
         Spartan::Protocol(message) => Error::Protocol(message),
         Spartan::BodyTooLarge { max } => {
             Error::Protocol(format!("spartan response exceeds {max} bytes"))
-        },
+        }
+    }
+}
+
+fn native_options(options: &crate::FetchOptions) -> spartan_protocol::FetchOptions {
+    spartan_protocol::FetchOptions {
+        timeout: options.timeout,
+        max_request_bytes: options.max_request_bytes,
+        max_body: options.max_body_bytes,
+        max_header_line_bytes: options.max_header_line_bytes,
+        ..Default::default()
     }
 }
 

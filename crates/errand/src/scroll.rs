@@ -26,10 +26,11 @@ use url::Url;
 use crate::{Error, Response, Status};
 
 /// Fetch a `scroll://` URL with no language preference.
-pub(crate) async fn fetch(url: &Url) -> Result<Response, Error> {
-    let response = scroll_protocol::fetch(url.as_str(), &[], false)
-        .await
-        .map_err(map_error)?;
+pub(crate) async fn fetch(url: &Url, options: &crate::FetchOptions) -> Result<Response, Error> {
+    let response =
+        scroll_protocol::fetch_with_options(url.as_str(), &[], false, &native_options(options))
+            .await
+            .map_err(map_error)?;
     Ok(into_errand_response(url, response))
 }
 
@@ -81,10 +82,34 @@ fn map_error(error: scroll_protocol::ClientError) -> Error {
         Scroll::BadUrl(message) => Error::BadUrl(message),
         Scroll::Connect(message) => Error::Connect(message),
         Scroll::Io(message) => Error::Io(message),
+        Scroll::Timeout => Error::Timeout,
         Scroll::Protocol(message) => Error::Protocol(message),
         Scroll::CertificateChanged { host, pinned, seen } => {
             Error::CertificateChanged { host, pinned, seen }
-        },
+        }
+    }
+}
+
+/// Full native Scroll metadata with caller limits.
+pub async fn fetch_with_options(
+    url: &str,
+    languages: &[&str],
+    metadata: bool,
+    options: &crate::FetchOptions,
+) -> Result<scroll_protocol::Response, Error> {
+    scroll_protocol::fetch_with_options(url, languages, metadata, &native_options(options))
+        .await
+        .map_err(map_error)
+}
+
+pub(crate) fn native_options(
+    options: &crate::FetchOptions,
+) -> scroll_protocol::client::FetchOptions {
+    scroll_protocol::client::FetchOptions {
+        timeout: options.timeout,
+        max_request_bytes: options.max_request_bytes,
+        max_header_line_bytes: options.max_header_line_bytes,
+        max_body_bytes: options.max_body_bytes,
     }
 }
 

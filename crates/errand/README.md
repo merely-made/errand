@@ -31,7 +31,7 @@ leave: the protocols of the small web, with a small dependency cone.
 
 `errand::fetch` routes by URL scheme and returns a normalized `Status`, the
 protocol `meta` line, and the raw body. It does not follow redirects; the caller
-decides. Seven read schemes are routed through `fetch`:
+decides. Eight schemes are routed through `fetch`:
 
 | Scheme      | Port | Transport          | Notes                                  |
 |-------------|------|--------------------|----------------------------------------|
@@ -41,6 +41,7 @@ decides. Seven read schemes are routed through `fetch`:
 | `spartan://`| 300  | plaintext TCP      | numeric status                         |
 | `nex://`    | 1900 | plaintext TCP      | no status code                         |
 | `guppy://`  | 6775 | UDP (stop-and-wait)| numeric status, ACK-per-packet         |
+| `scroll://` | 5699 | TLS (TOFU) | native language and metadata API |
 | `titan://`  | 1965 | TLS (TOFU)         | gemini's upload sibling; see below     |
 
 ### Write companions
@@ -79,6 +80,49 @@ Two schemes write rather than fetch, so they are direct calls, not part of
 schemes that have one (gemini, spartan, guppy, titan); it is `None` for gopher,
 finger, and nex, which carry no status.
 
+## Caller limits
+
+Errand fetch wrappers use bounded composition defaults. Existing finite native
+convenience defaults (Nex/Spartan/Guppy and legacy Titan: 16 MiB) remain intact;
+Errand explicitly supplies its 64 MiB response policy through the new options.
+`FetchOptions` supplies
+`timeout` (30 seconds for the whole DNS/connect/TLS/exchange),
+`max_request_bytes` (4096), `max_header_line_bytes` (4096 per wire line including
+CRLF), and `max_body_bytes` (64 MiB of response content). Gemini and Titan retain
+native 1024-byte request-line and response-header ceilings even when the caller
+chooses larger budgets. Scroll permits a larger configured metadata-line budget;
+its four native success-header lines retain dates and author verbatim. Headerless
+protocols ignore the header setting. Guppy counts each sequence once and checks
+its reassembly budget before accepting/acknowledging new data.
+
+Use `fetch_with_options`, `fetch_url_with_options`, or
+`fetch_url_with_identity_and_options` (an optional Gemini identity). Streaming
+callers use `fetch_gemini_url_streaming_with_options` or
+`fetch_gemini_url_streaming_with_identity_and_options`; overflowing bytes never
+reach the callback or returned body. Exact caps succeed; overflow is an error,
+never a successful truncated document. Redirect decisions and a deadline across
+multiple fetches remain with the host. Existing `*_timeout` helpers replace the
+default timeout without silently imposing a second 30-second deadline.
+
+`scroll_fetch_with_options` keeps the native language/abstract/metadata API.
+`spartan_submit_with_options`, `titan_upload_with_options`, and
+`titan_upload_with_identity_and_options` are explicit write operations. Their
+request budget counts the full wire request including payload, independently of
+the response body budget. Legacy explicit upload/submit wrappers allow the
+already caller-owned payload plus their default line allowance and still bound
+the response and whole operation. Passing Titan to generic fetch retains its
+existing zero-byte upload behavior; callers remain responsible for requiring
+explicit Submit and guarding redirects into write schemes. Misfin mail and the
+standalone DICT/FSP/Kepler/Text client families have separate native policies.
+
+```rust
+let limits = errand::FetchOptions {
+    max_body_bytes: 2 * 1024 * 1024,
+    ..Default::default()
+};
+let page = errand::fetch_with_options("scroll://example.net/", &limits).await?;
+```
+
 ## Trust (TOFU)
 
 Gemini capsules are conventionally self-signed, so there is no CA to anchor
@@ -116,7 +160,7 @@ cargo test
 ```
 
 Tests are inline `#[cfg(test)]` modules (request construction, scheme routing,
-status mapping). There is no `tests/` integration directory and no `examples/`.
+status mapping). Loopback integration tests cover routed limits without public network access.
 
 ## Dependencies and platform
 

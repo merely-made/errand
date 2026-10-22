@@ -73,6 +73,8 @@ pub use server::{ServerConfig, serve};
 
 #[cfg(feature = "client")]
 pub use client::{
-    ClientError, DEFAULT_PORT, PlusReply, Response, fetch, fetch_attributes,
-    fetch_directory_attributes, fetch_plus, mime_for_item_type,
+    ClientError, DEFAULT_PORT, FetchOptions, PlusReply, Response, fetch, fetch_attributes,
+    fetch_attributes_with_options, fetch_directory_attributes,
+    fetch_directory_attributes_with_options, fetch_plus, fetch_plus_with_options,
+    fetch_with_options, mime_for_item_type,
 };

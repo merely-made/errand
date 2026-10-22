@@ -1,0 +1,36 @@
+{
+  "schema": "client-limits-qualification-v1",
+  "owner": "scorpion-protocol",
+  "date": "2026-10-22",
+  "baseline": "5d1170642b480b8cb96a487edd7caa840d592c86",
+  "source_file": "crates/scorpion-protocol/src/client.rs",
+  "source_git_blob": "69906f069507570e28c4ec3edda6a12dc7f6c568",
+  "source_native_sha256": "6e63cac166426f4669fca5ddda8d499b1d5bc81823648112729f6b14228b6d1b",
+  "target": "C:\\t\\cargo-targets\\smolweb",
+  "build_dir": "C:\\t\\cargo-targets\\smolweb\\build",
+  "commands": [
+    {
+      "command": "cargo test -p scorpion-protocol --all-features --lib",
+      "exit_code": 0,
+      "passed": 58,
+      "failed": 0
+    },
+    {
+      "command": "cargo clippy -p scorpion-protocol --all-features --all-targets --no-deps -- -D warnings",
+      "exit_code": 0
+    }
+  ],
+  "qualified": [
+    "unknown body exact fit and cap+1 refusal before append",
+    "zero body cap empty/excess controls",
+    "partial response policy overflow",
+    "partial requested range preserves following status bytes",
+    "existing declared length and short response controls"
+  ],
+  "limits": [
+    "native API only; not an Errand route",
+    "caller owns whole-operation deadline",
+    "payload length bound is not a total allocator capacity bound"
+  ],
+  "receipt_byte_convention": "UTF-8 JSON, -text attribute; Git and native receipt bytes identical"
+}

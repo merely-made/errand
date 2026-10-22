@@ -17,14 +17,14 @@
 //! match spec v0.4.4 — it expected seq-0 headers with two-digit gemini-style
 //! codes. Replaced 2026-07-04.)
 
-use guppy_protocol::{FetchOptions, GuppyResponse};
+use guppy_protocol::GuppyResponse;
 use url::Url;
 
 use crate::{Error, Response, Status};
 
 /// Fetch a `guppy://` URL over UDP.
-pub(crate) async fn fetch(url: &Url) -> Result<Response, Error> {
-    let response = guppy_protocol::fetch(url.as_str(), &FetchOptions::default())
+pub(crate) async fn fetch(url: &Url, options: &crate::FetchOptions) -> Result<Response, Error> {
+    let response = guppy_protocol::fetch(url.as_str(), &native_options(options))
         .await
         .map_err(map_error)?;
     Ok(map_response(url, response))
@@ -60,7 +60,17 @@ fn map_error(error: guppy_protocol::ClientError) -> Error {
         GuppyError::Protocol(message) => Error::Protocol(message),
         GuppyError::BodyTooLarge { max } => {
             Error::Protocol(format!("guppy response exceeds {max} bytes"))
-        },
+        }
+    }
+}
+
+fn native_options(options: &crate::FetchOptions) -> guppy_protocol::FetchOptions {
+    guppy_protocol::FetchOptions {
+        timeout: options.timeout,
+        max_request_bytes: options.max_request_bytes,
+        max_body: options.max_body_bytes,
+        max_header_line_bytes: options.max_header_line_bytes,
+        ..Default::default()
     }
 }
 

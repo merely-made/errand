@@ -8,6 +8,7 @@
 //!   the handshake — accepting a first contact or a matching cert, rejecting a
 //!   changed one — so the request is never sent to a host whose certificate no
 //!   longer matches.
+//!
 //! Titan uploads use this same connector through
 //! [`crate::client::tofu_connect_inner`], so reads and writes share one trust
 //! decision.

@@ -72,3 +72,16 @@ are honoured and the limitation is recorded in the docs.
 ## License
 
 MIT.
+
+## Client bounds
+
+Client operations have a 30-second whole-operation deadline, including connection
+setup, and a 64 MiB response-body default. Overflow returns an error rather than
+a truncated success. Bounds are enforced before body append. No runtime is added to the dependency-free grammar feature.
+
+`client::FetchOptions` supplies `timeout`, `max_request_bytes`,
+`max_header_line_bytes`, and `max_body_bytes`. `fetch_with_options` and
+`exchange_with_options` retain language preferences, abstract requests, author,
+verbatim dates, and UDC status. Defaults are 4096 bytes for the request and each
+of the four success-header lines, including CRLF. Callers can raise the line
+budget for long native metadata. Unterminated/non-CRLF header lines are refused.

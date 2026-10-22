@@ -19,8 +19,8 @@ use url::Url;
 use crate::{Error, Response, Status};
 
 /// Fetch a `nex://` URL.
-pub(crate) async fn fetch(url: &Url) -> Result<Response, Error> {
-    let body = nex_protocol::fetch(url.as_str(), &Default::default())
+pub(crate) async fn fetch(url: &Url, options: &crate::FetchOptions) -> Result<Response, Error> {
+    let body = nex_protocol::fetch(url.as_str(), &native_options(options))
         .await
         .map_err(map_error)?;
     Ok(Response {
@@ -38,7 +38,17 @@ fn map_error(error: nex_protocol::ClientError) -> Error {
         Nex::BadUrl(message) => Error::BadUrl(message),
         Nex::Io(message) => Error::Io(message),
         Nex::Timeout(_) => Error::Timeout,
+        Nex::RequestTooLarge { max } => Error::Protocol(format!("nex request exceeds {max} bytes")),
         Nex::BodyTooLarge { max } => Error::Protocol(format!("nex response exceeds {max} bytes")),
+    }
+}
+
+fn native_options(options: &crate::FetchOptions) -> nex_protocol::FetchOptions {
+    nex_protocol::FetchOptions {
+        timeout: options.timeout,
+        max_request_bytes: options.max_request_bytes,
+        max_body: options.max_body_bytes,
+        ..Default::default()
     }
 }
 

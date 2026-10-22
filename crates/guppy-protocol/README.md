@@ -69,3 +69,15 @@ Not covered: encryption (the spec declares it out of scope).
 
 MIT. The specification declares no license; this implementation is original
 code.
+
+## Client bounds
+
+Client operations have a 30-second whole-operation deadline, including connection
+setup, and preserve their 16 MiB response-body default. Overflow returns an
+error rather than a truncated success. Bounds are enforced before body append. Existing feature and dependency boundaries remain unchanged.
+
+`FetchOptions` retains `max_body` and adds `max_request_bytes` (2048 by
+default, the native ceiling). The request budget includes CRLF.
+`max_header_line_bytes` defaults to 4096, including CRLF.
+Duplicate sequences do not consume the byte budget twice; completing an
+out-of-order response cannot bypass the cap. The deadline includes UDP setup.

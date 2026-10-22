@@ -220,6 +220,7 @@ dependencies = [
  "misfin",
  "nex-protocol",
  "quick-xml",
+ "rcgen",
  "rustls",
  "scroll-protocol",
  "spartan-protocol",

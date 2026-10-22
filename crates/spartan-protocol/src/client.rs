@@ -12,10 +12,14 @@ use super::{SPARTAN_PORT, Status};
 /// Options for a [`fetch`] or [`submit`].
 #[derive(Debug, Clone)]
 pub struct FetchOptions {
-    /// Per-step timeout (connect, write, read). Default 30s.
+    /// Whole-exchange deadline, including connection setup. Default 30s.
     pub timeout: Duration,
     /// Refuse response bodies larger than this. Default 16 MiB.
     pub max_body: usize,
+    /// Complete outgoing header and data block. Default 4096 bytes.
+    pub max_request_bytes: usize,
+    /// Response status line including CRLF. Default 4096 bytes.
+    pub max_header_line_bytes: usize,
     /// Connect here instead of resolving the URL's host (the URL's host is
     /// still sent in the request line). For tests and odd deployments.
     pub connect_addr: Option<std::net::SocketAddr>,
@@ -26,6 +30,8 @@ impl Default for FetchOptions {
         Self {
             timeout: Duration::from_secs(30),
             max_body: 16 * 1024 * 1024,
+            max_request_bytes: 4096,
+            max_header_line_bytes: 4096,
             connect_addr: None,
         }
     }
@@ -79,7 +85,7 @@ impl std::error::Error for ClientError {}
 /// (%-decoded) becomes the request's data block, so a plain fetch sends
 /// content-length 0 and a `?query` URL uploads the query.
 pub async fn fetch(url: &str, options: &FetchOptions) -> Result<Response, ClientError> {
-    let (host, port, path, query_data) = split_url(url)?;
+    let (host, port, path, query_data) = split_url_bounded(url, options.max_request_bytes, true)?;
     request(
         &host,
         port,
@@ -97,7 +103,7 @@ pub async fn submit(
     data: &[u8],
     options: &FetchOptions,
 ) -> Result<Response, ClientError> {
-    let (host, port, path, _) = split_url(url)?;
+    let (host, port, path, _) = split_url_bounded(url, options.max_request_bytes, false)?;
     request(&host, port, &path, data, options).await
 }
 
@@ -107,7 +113,16 @@ type UrlParts = (String, u16, String, Option<Vec<u8>>);
 
 /// Map a `spartan://` URL to its request parts per spec §5. The `url` crate
 /// handles IDN → punycode.
+#[cfg(test)]
 fn split_url(input: &str) -> Result<UrlParts, ClientError> {
+    split_url_bounded(input, usize::MAX, true)
+}
+
+fn split_url_bounded(
+    input: &str,
+    max: usize,
+    include_query: bool,
+) -> Result<UrlParts, ClientError> {
     let url = Url::parse(input).map_err(|error| ClientError::BadUrl(error.to_string()))?;
     if url.scheme() != "spartan" {
         return Err(ClientError::BadUrl(format!(
@@ -120,14 +135,39 @@ fn split_url(input: &str) -> Result<UrlParts, ClientError> {
             .ok_or_else(|| ClientError::BadUrl("URL has no host".to_string()))?,
     )?;
     let port = url.port().unwrap_or(SPARTAN_PORT);
+    if url.path().len() > max {
+        return Err(ClientError::Protocol(
+            "request path exceeds configured limit".into(),
+        ));
+    }
     let path = if url.path().is_empty() {
         "/".to_string()
     } else {
         url.path().to_string()
     };
-    let query_data = url
-        .query()
-        .map(|query| percent_decode_str(query).collect::<Vec<u8>>());
+    if host.len().saturating_add(path.len()).saturating_add(5) > max {
+        return Err(ClientError::Protocol(
+            "request exceeds configured limit".into(),
+        ));
+    }
+    let query_data = if include_query {
+        if let Some(query) = url.query() {
+            let mut data = Vec::new();
+            for byte in percent_decode_str(query) {
+                if data.len() == max {
+                    return Err(ClientError::Protocol(
+                        "request data exceeds configured limit".into(),
+                    ));
+                }
+                data.push(byte);
+            }
+            Some(data)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     Ok((host, port, path, query_data))
 }
 
@@ -155,57 +195,91 @@ async fn request(
     data: &[u8],
     options: &FetchOptions,
 ) -> Result<Response, ClientError> {
-    let request_line = format!("{host} {path} {}\r\n", data.len());
+    tokio::time::timeout(options.timeout, async {
+        let request_line = format!("{host} {path} {}\r\n", data.len());
 
-    let connect = async {
-        match options.connect_addr {
-            Some(addr) => TcpStream::connect(addr).await,
-            None => TcpStream::connect((host, port)).await,
+        if data.len() > options.max_request_bytes.saturating_sub(request_line.len())
+            || request_line.len() > options.max_request_bytes
+        {
+            return Err(ClientError::Protocol(
+                "request exceeds configured limit".into(),
+            ));
         }
-    };
-    let mut stream = tokio::time::timeout(options.timeout, connect)
-        .await
-        .map_err(|_| ClientError::Timeout("connect"))?
-        .map_err(|error| ClientError::Io(error.to_string()))?;
 
-    let write = async {
-        stream.write_all(request_line.as_bytes()).await?;
-        if !data.is_empty() {
-            stream.write_all(data).await?;
+        let connect = async {
+            match options.connect_addr {
+                Some(addr) => TcpStream::connect(addr).await,
+                None => TcpStream::connect((host, port)).await,
+            }
+        };
+        let mut stream = tokio::time::timeout(options.timeout, connect)
+            .await
+            .map_err(|_| ClientError::Timeout("connect"))?
+            .map_err(|error| ClientError::Io(error.to_string()))?;
+
+        let write = async {
+            stream.write_all(request_line.as_bytes()).await?;
+            if !data.is_empty() {
+                stream.write_all(data).await?;
+            }
+            stream.flush().await
+        };
+        tokio::time::timeout(options.timeout, write)
+            .await
+            .map_err(|_| ClientError::Timeout("request write"))?
+            .map_err(|error| ClientError::Io(error.to_string()))?;
+
+        read_response(&mut stream, options).await
+    })
+    .await
+    .map_err(|_| ClientError::Timeout("exchange"))?
+}
+
+async fn read_response<S: tokio::io::AsyncRead + Unpin>(
+    stream: &mut S,
+    options: &FetchOptions,
+) -> Result<Response, ClientError> {
+    let mut header = Vec::new();
+    loop {
+        let mut byte = [0];
+        if stream
+            .read(&mut byte)
+            .await
+            .map_err(|e| ClientError::Io(e.to_string()))?
+            == 0
+        {
+            return Err(ClientError::Protocol("status line has no CRLF".into()));
         }
-        stream.flush().await
-    };
-    tokio::time::timeout(options.timeout, write)
-        .await
-        .map_err(|_| ClientError::Timeout("request write"))?
-        .map_err(|error| ClientError::Io(error.to_string()))?;
-
-    // The response body ends at connection close, so read to EOF under the
-    // size cap. The cap counts header + body; close enough for protection.
-    let read = async {
-        let mut raw = Vec::new();
-        let mut chunk = [0u8; 8192];
+        if header.len() == options.max_header_line_bytes {
+            return Err(ClientError::Protocol(
+                "status line exceeds configured limit".into(),
+            ));
+        }
+        header.push(byte[0]);
+        if header.ends_with(b"\r\n") {
+            break;
+        }
+    }
+    let mut response = parse_response(&header)?;
+    if response.status == Status::Success {
+        let mut chunk = [0; 8192];
         loop {
-            let count = stream.read(&mut chunk).await?;
+            let count = stream
+                .read(&mut chunk)
+                .await
+                .map_err(|e| ClientError::Io(e.to_string()))?;
             if count == 0 {
                 break;
             }
-            raw.extend_from_slice(&chunk[..count]);
-            if raw.len() > options.max_body {
-                return Ok::<_, std::io::Error>(None);
+            if count > options.max_body.saturating_sub(response.body.len()) {
+                return Err(ClientError::BodyTooLarge {
+                    max: options.max_body,
+                });
             }
+            response.body.extend_from_slice(&chunk[..count]);
         }
-        Ok(Some(raw))
-    };
-    let raw = tokio::time::timeout(options.timeout, read)
-        .await
-        .map_err(|_| ClientError::Timeout("response read"))?
-        .map_err(|error| ClientError::Io(error.to_string()))?
-        .ok_or(ClientError::BodyTooLarge {
-            max: options.max_body,
-        })?;
-
-    parse_response(&raw)
+    }
+    Ok(response)
 }
 
 /// Split a raw response into its `<digit> <meta>\r\n` status line and body.

@@ -61,8 +61,8 @@ pub use gemtext::{GemLine, parse as parse_gemtext};
 
 #[cfg(feature = "client")]
 pub use client::{
-    ClientError, DEFAULT_PORT, Response, ResponseHead, Status, exchange, exchange_streaming,
-    parse_response,
+    ClientError, DEFAULT_PORT, FetchOptions, Response, ResponseHead, Status, exchange,
+    exchange_streaming, exchange_streaming_with_options, exchange_with_options, parse_response,
 };
 #[cfg(feature = "tls")]
 pub use titan::{DEFAULT_MAX_RESPONSE_BYTES, UploadOptions, upload_with_options};

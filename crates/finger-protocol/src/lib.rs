@@ -42,7 +42,10 @@ pub mod server;
 pub mod webfinger;
 
 #[cfg(feature = "client")]
-pub use client::{ClientError, DEFAULT_PORT, Response, fetch, query};
+pub use client::{
+    ClientError, DEFAULT_PORT, FetchOptions, Response, fetch, fetch_with_options, query,
+    query_with_options,
+};
 
 #[cfg(feature = "server")]
 pub use server::{ServerConfig, serve};

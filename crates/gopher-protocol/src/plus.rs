@@ -174,10 +174,10 @@ pub fn parse_attributes(text: &str) -> Vec<AttributeBlock> {
                 head: (!head.is_empty()).then(|| head.to_string()),
                 lines: Vec::new(),
             });
-        } else if let Some(content) = line.strip_prefix(' ') {
-            if let Some(block) = blocks.last_mut() {
-                block.lines.push(content.to_string());
-            }
+        } else if let Some(content) = line.strip_prefix(' ')
+            && let Some(block) = blocks.last_mut()
+        {
+            block.lines.push(content.to_string());
         }
     }
     blocks

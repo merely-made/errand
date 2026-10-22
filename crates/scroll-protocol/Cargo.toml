@@ -17,7 +17,7 @@ readme = "README.md"
 # fetch, riding gemini-protocol's TOFU seam because scroll's spec declares
 # gemini's trust posture in so many words.
 default = ["tls"]
-client = ["dep:tokio", "dep:url"]
+client = ["dep:tokio", "dep:url", "tokio/time"]
 tls = ["client", "gemini-protocol/tls"]
 server = ["dep:tokio", "dep:url", "tokio/time"]
 

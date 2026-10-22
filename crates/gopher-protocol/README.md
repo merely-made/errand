@@ -59,3 +59,18 @@ rather than part of the RFC.
 ## License
 
 MIT.
+
+## Client bounds
+
+Client operations have a 30-second whole-operation deadline, including connection
+setup, and a 64 MiB response-body default. Overflow returns an error rather than
+a truncated success. Bounds are enforced before body append. No runtime is added to the dependency-free grammar feature.
+
+`client::FetchOptions` supplies `timeout`, `max_request_bytes`,
+`max_header_line_bytes`, and `max_body_bytes`. `fetch_with_options`,
+`fetch_plus_with_options`, `fetch_attributes_with_options`, and
+`fetch_directory_attributes_with_options` retain native Gopher+ headers and
+attributes. Defaults are 4096 request/header-line bytes including line endings.
+Counted Gopher+ replies reject lengths above the body cap and premature EOF.
+For period-terminated replies the wire body, including the terminator, is bounded
+before removing the terminator. Plain Gopher has no response header.

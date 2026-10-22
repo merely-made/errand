@@ -28,12 +28,34 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::wire::DEFAULT_PORT;
 use crate::wire::{Header, Status, finish_success, parse_status_line, request_line};
 
+/// Caller-owned bounds for one complete exchange, including connection setup.
+/// Byte budgets include CRLF for request/header lines; body bytes are separate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FetchOptions {
+    pub timeout: std::time::Duration,
+    pub max_request_bytes: usize,
+    pub max_header_line_bytes: usize,
+    pub max_body_bytes: usize,
+}
+impl Default for FetchOptions {
+    fn default() -> Self {
+        Self {
+            timeout: std::time::Duration::from_secs(30),
+            max_request_bytes: 4096,
+            max_header_line_bytes: 4096,
+            max_body_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
+
 /// What can go wrong.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientError {
     BadUrl(String),
     Connect(String),
     Io(String),
+    /// The whole exchange deadline expired.
+    Timeout,
     Protocol(String),
     /// The host's pinned certificate changed; nothing was sent.
     CertificateChanged {
@@ -49,10 +71,14 @@ impl std::fmt::Display for ClientError {
             Self::BadUrl(m) => write!(f, "bad url: {m}"),
             Self::Connect(m) => write!(f, "connect: {m}"),
             Self::Io(m) => write!(f, "io: {m}"),
+            Self::Timeout => write!(f, "exchange timed out"),
             Self::Protocol(m) => write!(f, "protocol: {m}"),
             Self::CertificateChanged { host, pinned, seen } => {
-                write!(f, "certificate for {host} changed: pinned {pinned}, saw {seen}")
-            },
+                write!(
+                    f,
+                    "certificate for {host} changed: pinned {pinned}, saw {seen}"
+                )
+            }
         }
     }
 }
@@ -67,10 +93,11 @@ impl From<gemini_protocol::ClientError> for ClientError {
             Gemini::BadUrl(m) => Self::BadUrl(m),
             Gemini::Connect(m) => Self::Connect(m),
             Gemini::Io(m) => Self::Io(m),
+            Gemini::Timeout => Self::Timeout,
             Gemini::Protocol(m) => Self::Protocol(m),
             Gemini::CertificateChanged { host, pinned, seen } => {
                 Self::CertificateChanged { host, pinned, seen }
-            },
+            }
         }
     }
 }
@@ -89,25 +116,41 @@ pub struct Response {
 /// `languages` are BCP47 tags, most preferred first. `metadata` asks for the
 /// resource's abstract rather than its body.
 #[cfg(feature = "tls")]
-pub async fn fetch(
+pub async fn fetch(url: &str, languages: &[&str], metadata: bool) -> Result<Response, ClientError> {
+    fetch_with_options(url, languages, metadata, &FetchOptions::default()).await
+}
+
+/// Fetch with caller-owned bounds, retaining all native metadata.
+#[cfg(feature = "tls")]
+pub async fn fetch_with_options(
     url: &str,
     languages: &[&str],
     metadata: bool,
+    options: &FetchOptions,
 ) -> Result<Response, ClientError> {
-    let parsed = url::Url::parse(url).map_err(|e| ClientError::BadUrl(e.to_string()))?;
-    if parsed.scheme() != "scroll" {
-        return Err(ClientError::BadUrl(format!(
-            "scheme {} is not scroll",
-            parsed.scheme()
-        )));
-    }
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| ClientError::BadUrl("scroll URL has no host".into()))?;
-    let port = parsed.port().unwrap_or(DEFAULT_PORT);
+    tokio::time::timeout(options.timeout, async {
+        if request_size(url, languages, metadata) > options.max_request_bytes {
+            return Err(ClientError::Protocol(
+                "request exceeds configured limit".into(),
+            ));
+        }
+        let parsed = url::Url::parse(url).map_err(|e| ClientError::BadUrl(e.to_string()))?;
+        if parsed.scheme() != "scroll" {
+            return Err(ClientError::BadUrl(format!(
+                "scheme {} is not scroll",
+                parsed.scheme()
+            )));
+        }
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| ClientError::BadUrl("scroll URL has no host".into()))?;
+        let port = parsed.port().unwrap_or(DEFAULT_PORT);
 
-    let mut stream = gemini_protocol::tofu_connect(host, port).await?;
-    exchange(url, languages, metadata, &mut stream).await
+        let mut stream = gemini_protocol::tofu_connect(host, port).await?;
+        exchange_with_options(url, languages, metadata, &mut stream, options).await
+    })
+    .await
+    .map_err(|_| ClientError::Timeout)?
 }
 
 /// Run the exchange over any connected stream.
@@ -123,42 +166,83 @@ pub async fn exchange<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    stream
-        .write_all(request_line(url, languages, metadata).as_bytes())
-        .await
-        .map_err(|e| ClientError::Io(e.to_string()))?;
+    exchange_with_options(url, languages, metadata, stream, &FetchOptions::default()).await
+}
 
-    let status_line = read_line(stream).await?;
-    let (code, status, meta) =
-        parse_status_line(&status_line).map_err(|e| ClientError::Protocol(e.0))?;
+/// Stream exchange with independently bounded request, metadata lines, and body.
+pub async fn exchange_with_options<S>(
+    url: &str,
+    languages: &[&str],
+    metadata: bool,
+    stream: &mut S,
+    options: &FetchOptions,
+) -> Result<Response, ClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    tokio::time::timeout(options.timeout, async {
+        if request_size(url, languages, metadata) > options.max_request_bytes {
+            return Err(ClientError::Protocol(
+                "request exceeds configured limit".into(),
+            ));
+        }
+        let request = request_line(url, languages, metadata);
+        if request.len() > options.max_request_bytes {
+            return Err(ClientError::Protocol(
+                "request exceeds configured limit".into(),
+            ));
+        }
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .map_err(|e| ClientError::Io(e.to_string()))?;
 
-    if status != Status::Success {
-        return Ok(Response {
-            header: Header::Meta { code, status, meta },
-            body: Vec::new(),
-        });
-    }
+        let status_line = read_line(stream, options.max_header_line_bytes).await?;
+        let (code, status, meta) =
+            parse_status_line(&status_line).map_err(|e| ClientError::Protocol(e.0))?;
 
-    // A success carries three metadata lines before the body.
-    let author = read_line(stream).await?;
-    let published = read_line(stream).await?;
-    let modified = read_line(stream).await?;
+        if status != Status::Success {
+            return Ok(Response {
+                header: Header::Meta { code, status, meta },
+                body: Vec::new(),
+            });
+        }
 
-    let mut body = Vec::new();
-    stream
-        .read_to_end(&mut body)
-        .await
-        .map_err(|e| ClientError::Io(e.to_string()))?;
+        // A success carries three metadata lines before the body.
+        let author = read_line(stream, options.max_header_line_bytes).await?;
+        let published = read_line(stream, options.max_header_line_bytes).await?;
+        let modified = read_line(stream, options.max_header_line_bytes).await?;
 
-    Ok(Response {
-        header: Header::Success(finish_success(code, meta, &author, &published, &modified)),
-        body,
+        let mut body = Vec::new();
+        let mut chunk = [0; 8192];
+        loop {
+            let count = stream
+                .read(&mut chunk)
+                .await
+                .map_err(|e| ClientError::Io(e.to_string()))?;
+            if count == 0 {
+                break;
+            }
+            if count > options.max_body_bytes.saturating_sub(body.len()) {
+                return Err(ClientError::Protocol(
+                    "body exceeds configured limit".into(),
+                ));
+            }
+            body.extend_from_slice(&chunk[..count]);
+        }
+
+        Ok(Response {
+            header: Header::Success(finish_success(code, meta, &author, &published, &modified)),
+            body,
+        })
     })
+    .await
+    .map_err(|_| ClientError::Timeout)?
 }
 
 /// Read one CRLF-terminated header line, byte-wise so the body that follows
 /// is never swallowed by a buffered reader.
-async fn read_line<S>(stream: &mut S) -> Result<String, ClientError>
+async fn read_line<S>(stream: &mut S, max: usize) -> Result<String, ClientError>
 where
     S: AsyncRead + Unpin,
 {
@@ -169,15 +253,30 @@ where
             .read(&mut byte)
             .await
             .map_err(|e| ClientError::Io(e.to_string()))?;
-        if count == 0 || byte[0] == b'\n' {
-            break;
+        if count == 0 {
+            return Err(ClientError::Protocol("unterminated header line".into()));
+        }
+        if line.len() == max {
+            return Err(ClientError::Protocol(
+                "header line exceeds configured limit".into(),
+            ));
         }
         line.push(byte[0]);
-        if line.len() > 4096 {
-            return Err(ClientError::Protocol("header line is unreasonable".into()));
+        if line.ends_with(b"\r\n") {
+            line.truncate(line.len() - 2);
+            break;
         }
     }
     String::from_utf8(line).map_err(|_| ClientError::Protocol("header is not UTF-8".into()))
+}
+
+fn request_size(url: &str, languages: &[&str], metadata: bool) -> usize {
+    languages.iter().fold(
+        url.len()
+            .saturating_add(3 + usize::from(metadata))
+            .saturating_add(languages.len().saturating_sub(1)),
+        |size, tag| size.saturating_add(tag.len()),
+    )
 }
 
 #[cfg(test)]
@@ -245,7 +344,9 @@ mod tests {
             server.shutdown().await.unwrap();
         });
 
-        let response = exchange("scroll://x/", &["en"], false, &mut client).await.unwrap();
+        let response = exchange("scroll://x/", &["en"], false, &mut client)
+            .await
+            .unwrap();
         let Header::Success(header) = &response.header else {
             panic!("expected success");
         };
@@ -270,7 +371,9 @@ mod tests {
             server.shutdown().await.unwrap();
         });
 
-        let response = exchange("scroll://x/doc", &["en"], true, &mut client).await.unwrap();
+        let response = exchange("scroll://x/doc", &["en"], true, &mut client)
+            .await
+            .unwrap();
         assert_eq!(response.body, b"# Title\n", "the abstract is the body");
     }
 
@@ -284,7 +387,9 @@ mod tests {
             server.shutdown().await.unwrap();
         });
 
-        let response = exchange("scroll://x/", &["en"], false, &mut client).await.unwrap();
+        let response = exchange("scroll://x/", &["en"], false, &mut client)
+            .await
+            .unwrap();
         assert_eq!(
             response.header,
             Header::Meta {

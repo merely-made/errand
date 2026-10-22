@@ -72,7 +72,7 @@ pub use wire::{
 };
 
 #[cfg(feature = "client")]
-pub use client::{ClientError, Response, exchange};
+pub use client::{ClientError, FetchOptions, Response, exchange, exchange_with_options};
 
 #[cfg(feature = "tls")]
-pub use client::fetch;
+pub use client::{fetch, fetch_with_options};

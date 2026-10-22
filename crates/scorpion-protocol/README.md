@@ -109,6 +109,15 @@ reads the declared size after a partial response waits forever for bytes the
 server was never going to send — which is exactly the bug this crate's own
 test caught during development.
 
+## Receive limits
+
+The native client accepts `Limits` (32 MiB body by default). Declared lengths
+are checked before allocation; unknown-length bodies refuse the first byte
+over the cap rather than returning a successful prefix. Partial responses obey
+the caller's body cap while preserving the requested range as a frame boundary,
+so a following interactive status line is left unread. Callers own the overall
+operation deadline, including connection setup and interactive sessions.
+
 ## License
 
 MIT. The specification declares no licence; this implementation is original

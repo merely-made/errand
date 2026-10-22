@@ -20,6 +20,10 @@ pub struct FetchOptions {
     /// Refuse reassembled bodies larger than this (also bounds the buffer
     /// held for out-of-order chunks). Default 16 MiB.
     pub max_body: usize,
+    /// Full request datagram, bounded additionally by the native 2048 ceiling.
+    pub max_request_bytes: usize,
+    /// First/special packet header through CRLF. Default 4096 bytes.
+    pub max_header_line_bytes: usize,
     /// Send to this address instead of resolving the URL's host. For tests
     /// and odd deployments.
     pub connect_addr: Option<std::net::SocketAddr>,
@@ -31,6 +35,8 @@ impl Default for FetchOptions {
             timeout: Duration::from_secs(30),
             retransmit_after: Duration::from_secs(1),
             max_body: 16 * 1024 * 1024,
+            max_request_bytes: MAX_REQUEST_BYTES,
+            max_header_line_bytes: 4096,
             connect_addr: None,
         }
     }
@@ -79,40 +85,49 @@ impl std::error::Error for ClientError {}
 /// percent-encoded (the input-prompt flow: a [`GuppyResponse::Prompt`] answer
 /// means "repeat the request with input attached").
 pub async fn fetch(url: &str, options: &FetchOptions) -> Result<GuppyResponse, ClientError> {
-    let parsed = Url::parse(url).map_err(|error| ClientError::BadUrl(error.to_string()))?;
-    if parsed.scheme() != "guppy" {
-        return Err(ClientError::BadUrl(format!(
-            "expected guppy:// scheme, got {}://",
-            parsed.scheme()
-        )));
-    }
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| ClientError::BadUrl("URL has no host".to_string()))?;
-    let port = parsed.port().unwrap_or(GUPPY_PORT);
+    tokio::time::timeout(options.timeout, async {
+        let parsed = Url::parse(url).map_err(|error| ClientError::BadUrl(error.to_string()))?;
+        if parsed.scheme() != "guppy" {
+            return Err(ClientError::BadUrl(format!(
+                "expected guppy:// scheme, got {}://",
+                parsed.scheme()
+            )));
+        }
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| ClientError::BadUrl("URL has no host".to_string()))?;
+        let port = parsed.port().unwrap_or(GUPPY_PORT);
 
-    let request = format!("{url}\r\n");
-    if request.len() > MAX_REQUEST_BYTES {
-        return Err(ClientError::RequestTooLong {
-            request_bytes: request.len(),
-            max: MAX_REQUEST_BYTES,
-        });
-    }
+        let max = MAX_REQUEST_BYTES.min(options.max_request_bytes);
+        if url.len().saturating_add(2) > max {
+            return Err(ClientError::RequestTooLong {
+                request_bytes: url.len().saturating_add(2),
+                max,
+            });
+        }
+        let request = format!("{url}\r\n");
+        if request.len() > max {
+            return Err(ClientError::RequestTooLong {
+                request_bytes: request.len(),
+                max,
+            });
+        }
 
-    // The spec's session rule: one source port for the whole transaction —
-    // one bound socket per fetch.
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .await
-        .map_err(|error| ClientError::Io(format!("bind: {error}")))?;
-    match options.connect_addr {
-        Some(addr) => socket.connect(addr).await,
-        None => socket.connect((host, port)).await,
-    }
-    .map_err(|error| ClientError::Io(format!("connect: {error}")))?;
+        // The spec's session rule: one source port for the whole transaction —
+        // one bound socket per fetch.
+        let socket = UdpSocket::bind("0.0.0.0:0")
+            .await
+            .map_err(|error| ClientError::Io(format!("bind: {error}")))?;
+        match options.connect_addr {
+            Some(addr) => socket.connect(addr).await,
+            None => socket.connect((host, port)).await,
+        }
+        .map_err(|error| ClientError::Io(format!("connect: {error}")))?;
 
-    tokio::time::timeout(options.timeout, transact(&socket, &request, options))
-        .await
-        .map_err(|_| ClientError::Timeout)?
+        transact(&socket, &request, options).await
+    })
+    .await
+    .map_err(|_| ClientError::Timeout)?
 }
 
 /// Reassembly state for one success response.
@@ -131,16 +146,28 @@ struct Reassembly {
 }
 
 impl Reassembly {
-    fn insert(&mut self, seq: u32, data: Vec<u8>) {
-        self.buffered += data.len();
-        self.chunks.entry(seq).or_insert(data);
-        while self.chunks.contains_key(&(self.contiguous_end + 1)) {
+    fn insert(&mut self, seq: u32, data: Vec<u8>, max: usize) -> Result<(), ClientError> {
+        if !self.chunks.contains_key(&seq) {
+            if data.len() > max.saturating_sub(self.buffered) {
+                return Err(ClientError::BodyTooLarge { max });
+            }
+            self.buffered += data.len();
+            self.chunks.insert(seq, data);
+        }
+        while self
+            .contiguous_end
+            .checked_add(1)
+            .is_some_and(|next| self.chunks.contains_key(&next))
+        {
             self.contiguous_end += 1;
         }
+        Ok(())
     }
 
     fn complete(&self) -> bool {
-        self.eof_seq == Some(self.contiguous_end + 1)
+        self.contiguous_end
+            .checked_add(1)
+            .is_some_and(|next| self.eof_seq == Some(next))
     }
 
     fn into_response(self) -> GuppyResponse {
@@ -208,6 +235,19 @@ async fn transact(
             }
         };
 
+        // A first/special packet has a space after its sequence/status; a
+        // continuation has CRLF immediately. Check the wire header before parsing.
+        if let Some(split) = buffer[..count].windows(2).position(|w| w == b"\r\n") {
+            if split + 2 > options.max_header_line_bytes {
+                return Err(ClientError::Protocol(
+                    "packet header exceeds configured limit".into(),
+                ));
+            }
+        } else if count > options.max_header_line_bytes {
+            return Err(ClientError::Protocol(
+                "packet header exceeds configured limit".into(),
+            ));
+        }
         let packet = match parse_packet(&buffer[..count]) {
             Ok(packet) => packet,
             Err(error) => {
@@ -232,8 +272,10 @@ async fn transact(
             Packet::First { seq, mime, data } => {
                 // Always ack, duplicates included (a duplicate means our ack
                 // was lost).
-                send(encode_ack(seq)).await?;
                 if state.is_none() {
+                    if seq == u32::MAX {
+                        return Err(ClientError::Protocol("sequence has no room for EOF".into()));
+                    }
                     let mut reassembly = Reassembly {
                         first_seq: seq,
                         mime,
@@ -242,10 +284,10 @@ async fn transact(
                         buffered: 0,
                         eof_seq: None,
                     };
-                    reassembly.buffered = data.len();
-                    reassembly.chunks.insert(seq, data);
+                    reassembly.insert(seq, data, options.max_body)?;
                     state = Some(reassembly);
                 }
+                send(encode_ack(seq)).await?;
             }
             Packet::Continuation { seq, data } => {
                 // A continuation before the first packet cannot be anchored;
@@ -257,12 +299,18 @@ async fn transact(
                 if seq <= reassembly.first_seq {
                     continue;
                 }
-                send(encode_ack(seq)).await?;
                 if data.is_empty() {
+                    if reassembly.chunks.range(seq..).next().is_some() {
+                        return Err(ClientError::Protocol("EOF precedes received data".into()));
+                    }
                     reassembly.eof_seq = Some(seq);
                 } else {
-                    reassembly.insert(seq, data);
+                    if reassembly.eof_seq.is_some_and(|eof| seq >= eof) || seq == u32::MAX {
+                        return Err(ClientError::Protocol("data lies beyond EOF".into()));
+                    }
+                    reassembly.insert(seq, data, options.max_body)?;
                 }
+                send(encode_ack(seq)).await?;
             }
         }
     }

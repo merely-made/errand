@@ -17,7 +17,7 @@ readme = "README.md"
 # one) takes `default-features = false, features = ["client"]` and pulls no
 # JSON stack.
 default = ["client", "webfinger"]
-client = ["dep:tokio", "dep:url"]
+client = ["dep:tokio", "dep:url", "tokio/time"]
 webfinger = ["dep:serde", "dep:serde_json", "dep:percent-encoding"]
 # Serving is the same wire protocol read in the other direction. It is off by
 # default: a client must not carry listeners it will never run.

@@ -24,7 +24,7 @@ readme = "README.md"
 # - tls: TCP + rustls + trust-on-first-use pinning, and titan upload, which
 #   shares gemini's TLS. This is the ordinary internet client.
 default = ["tls"]
-client = ["dep:tokio", "dep:url"]
+client = ["dep:tokio", "dep:url", "tokio/time"]
 tls = ["client", "dep:rustls", "dep:tokio-rustls", "dep:ring"]
 # Serving. Implies tls, because gemini mandates it. Off by default: a client
 # must not carry listeners and certificate handling it will never run.

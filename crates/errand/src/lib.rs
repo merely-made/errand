@@ -53,14 +53,41 @@ pub mod serve;
 pub use gemini::exchange as gemini_exchange;
 pub use gemini_protocol::ClientIdentity as GeminiClientIdentity;
 pub use misfin::{ClientIdentity, MISFIN_PORT, send as misfin_send};
-pub use scroll::fetch_with as scroll_fetch;
-pub use spartan::submit as spartan_submit;
-pub use titan::{upload as titan_upload, upload_with_identity as titan_upload_with_identity};
+pub use scroll::{fetch_with as scroll_fetch, fetch_with_options as scroll_fetch_with_options};
+pub use spartan::{submit as spartan_submit, submit_with_options as spartan_submit_with_options};
+pub use titan::{
+    upload as titan_upload, upload_with_identity as titan_upload_with_identity,
+    upload_with_identity_and_options as titan_upload_with_identity_and_options,
+    upload_with_options as titan_upload_with_options,
+};
 // The TOFU store moved to gemini-protocol with the TLS it guards, and is
 // re-exported here so hosts that install one (genet-documents, mere's fetch)
 // keep the same `errand::` path and the same types.
 pub use gemini_protocol::{InMemoryTofu, PermissiveTofu, TofuStore, set_trust_store};
 pub use url::Url;
+
+/// Bounds for one network operation, including DNS/connect/TLS and all I/O.
+/// Defaults: 30 seconds, 4096 request bytes, 4096 bytes per response header
+/// line (including CRLF), and 64 MiB of response body. Native protocol ceilings
+/// remain effective. Request bytes include an upload's line and payload;
+/// protocols without a response header ignore the header budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FetchOptions {
+    pub timeout: std::time::Duration,
+    pub max_request_bytes: usize,
+    pub max_header_line_bytes: usize,
+    pub max_body_bytes: usize,
+}
+impl Default for FetchOptions {
+    fn default() -> Self {
+        Self {
+            timeout: std::time::Duration::from_secs(30),
+            max_request_bytes: 4096,
+            max_header_line_bytes: 4096,
+            max_body_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
 
 /// A small-web scheme `errand` can route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -241,7 +268,7 @@ pub async fn fetch(url: &str) -> Result<Response, Error> {
 /// failure (query-free URL, scheme, error, elapsed_ms). The facade only emits;
 /// the consuming app installs the subscriber and chooses the level.
 pub async fn fetch_url(url: &Url) -> Result<Response, Error> {
-    fetch_url_traced(url, None).await
+    fetch_url_with_options(url, &FetchOptions::default()).await
 }
 
 /// Fetch one Gemini URL while presenting a caller-owned client certificate.
@@ -254,7 +281,7 @@ pub async fn fetch_url_with_identity(
     if Scheme::parse(url.scheme()) != Some(Scheme::Gemini) {
         return Err(Error::UnsupportedScheme(url.scheme().to_string()));
     }
-    fetch_url_traced(url, Some(identity)).await
+    fetch_url_with_identity_and_options(url, Some(identity), &FetchOptions::default()).await
 }
 
 /// Fetch one Gemini URL and report body fragments as they arrive.
@@ -265,7 +292,7 @@ pub async fn fetch_gemini_url_streaming<F>(url: &Url, on_chunk: F) -> Result<Res
 where
     F: FnMut(BodyChunk<'_>),
 {
-    fetch_gemini_url_streaming_traced(url, None, on_chunk).await
+    fetch_gemini_url_streaming_with_options(url, &FetchOptions::default(), on_chunk).await
 }
 
 /// [`fetch_gemini_url_streaming`], presenting a caller-owned certificate.
@@ -277,12 +304,32 @@ pub async fn fetch_gemini_url_streaming_with_identity<F>(
 where
     F: FnMut(BodyChunk<'_>),
 {
-    fetch_gemini_url_streaming_traced(url, Some(identity), on_chunk).await
+    fetch_gemini_url_streaming_with_identity_and_options(
+        url,
+        Some(identity),
+        &FetchOptions::default(),
+        on_chunk,
+    )
+    .await
 }
 
-async fn fetch_gemini_url_streaming_traced<F>(
+/// Fetch Gemini with caller bounds and streaming delivery.
+pub async fn fetch_gemini_url_streaming_with_options<F>(
+    url: &Url,
+    options: &FetchOptions,
+    on_chunk: F,
+) -> Result<Response, Error>
+where
+    F: FnMut(BodyChunk<'_>),
+{
+    fetch_gemini_url_streaming_with_identity_and_options(url, None, options, on_chunk).await
+}
+
+/// Bounded streaming fetch with an optional caller-selected identity.
+pub async fn fetch_gemini_url_streaming_with_identity_and_options<F>(
     url: &Url,
     identity: Option<GeminiClientIdentity<'_>>,
+    options: &FetchOptions,
     mut on_chunk: F,
 ) -> Result<Response, Error>
 where
@@ -292,7 +339,7 @@ where
         return Err(Error::UnsupportedScheme(url.scheme().to_string()));
     }
     let started = std::time::Instant::now();
-    let result = gemini::fetch_streaming(url, identity, |head, bytes| {
+    let result = gemini::fetch_streaming(url, identity, options, |head, bytes| {
         on_chunk(BodyChunk {
             content_type: head.mime(),
             bytes,
@@ -303,12 +350,32 @@ where
     result
 }
 
-async fn fetch_url_traced(
+/// Parse and fetch with caller-owned limits.
+pub async fn fetch_with_options(url: &str, options: &FetchOptions) -> Result<Response, Error> {
+    let parsed = Url::parse(url).map_err(|e| Error::BadUrl(e.to_string()))?;
+    fetch_url_with_options(&parsed, options).await
+}
+
+/// Fetch with caller-owned limits.
+pub async fn fetch_url_with_options(url: &Url, options: &FetchOptions) -> Result<Response, Error> {
+    fetch_url_with_identity_and_options(url, None, options).await
+}
+
+/// Fetch with caller limits and an optional Gemini identity. A supplied
+/// identity is refused for every other scheme before any connection.
+pub async fn fetch_url_with_identity_and_options(
     url: &Url,
     identity: Option<GeminiClientIdentity<'_>>,
+    options: &FetchOptions,
 ) -> Result<Response, Error> {
+    if identity.is_some() && Scheme::parse(url.scheme()) != Some(Scheme::Gemini) {
+        return Err(Error::UnsupportedScheme(url.scheme().to_string()));
+    }
     let started = std::time::Instant::now();
-    let result = fetch_url_inner(url, identity).await;
+    let result = tokio::time::timeout(options.timeout, fetch_url_inner(url, identity, options))
+        .await
+        .map_err(|_| Error::Timeout)
+        .and_then(|result| result);
     trace_fetch_result(url, started, &result);
     result
 }
@@ -329,7 +396,7 @@ fn trace_fetch_result(url: &Url, started: std::time::Instant, result: &Result<Re
                 elapsed_ms,
                 "smolweb fetch complete"
             );
-        },
+        }
         Err(error) => {
             tracing::warn!(
                 target: "errand",
@@ -339,7 +406,7 @@ fn trace_fetch_result(url: &Url, started: std::time::Instant, result: &Result<Re
                 elapsed_ms,
                 "smolweb fetch failed"
             );
-        },
+        }
     }
 }
 
@@ -355,16 +422,17 @@ fn trace_url(url: &Url) -> Url {
 async fn fetch_url_inner(
     url: &Url,
     identity: Option<GeminiClientIdentity<'_>>,
+    options: &FetchOptions,
 ) -> Result<Response, Error> {
     match Scheme::parse(url.scheme()) {
-        Some(Scheme::Gemini) => gemini::fetch(url, identity).await,
-        Some(Scheme::Gopher) => gopher::fetch(url).await,
-        Some(Scheme::Finger) => finger::fetch(url).await,
-        Some(Scheme::Spartan) => spartan::fetch(url).await,
-        Some(Scheme::Nex) => nex::fetch(url).await,
-        Some(Scheme::Guppy) => guppy::fetch(url).await,
-        Some(Scheme::Titan) => titan::fetch(url).await,
-        Some(Scheme::Scroll) => scroll::fetch(url).await,
+        Some(Scheme::Gemini) => gemini::fetch(url, identity, options).await,
+        Some(Scheme::Gopher) => gopher::fetch(url, options).await,
+        Some(Scheme::Finger) => finger::fetch(url, options).await,
+        Some(Scheme::Spartan) => spartan::fetch(url, options).await,
+        Some(Scheme::Nex) => nex::fetch(url, options).await,
+        Some(Scheme::Guppy) => guppy::fetch(url, options).await,
+        Some(Scheme::Titan) => titan::fetch(url, options).await,
+        Some(Scheme::Scroll) => scroll::fetch(url, options).await,
         None => Err(Error::UnsupportedScheme(url.scheme().to_string())),
     }
 }
@@ -379,9 +447,14 @@ pub async fn fetch_timeout(url: &str, timeout: std::time::Duration) -> Result<Re
 /// Fetch an already-parsed `url` with a per-request timeout. Returns
 /// [`Error::Timeout`] if the fetch does not complete within `timeout`.
 pub async fn fetch_url_timeout(url: &Url, timeout: std::time::Duration) -> Result<Response, Error> {
-    tokio::time::timeout(timeout, fetch_url(url))
-        .await
-        .map_err(|_| Error::Timeout)?
+    fetch_url_with_options(
+        url,
+        &FetchOptions {
+            timeout,
+            ..FetchOptions::default()
+        },
+    )
+    .await
 }
 
 /// [`fetch_url_with_identity`] with a per-request timeout.
@@ -390,9 +463,15 @@ pub async fn fetch_url_timeout_with_identity(
     identity: GeminiClientIdentity<'_>,
     timeout: std::time::Duration,
 ) -> Result<Response, Error> {
-    tokio::time::timeout(timeout, fetch_url_with_identity(url, identity))
-        .await
-        .map_err(|_| Error::Timeout)?
+    fetch_url_with_identity_and_options(
+        url,
+        Some(identity),
+        &FetchOptions {
+            timeout,
+            ..FetchOptions::default()
+        },
+    )
+    .await
 }
 
 /// [`fetch_gemini_url_streaming`] with a per-request timeout.
@@ -404,9 +483,15 @@ pub async fn fetch_gemini_url_streaming_timeout<F>(
 where
     F: FnMut(BodyChunk<'_>),
 {
-    tokio::time::timeout(timeout, fetch_gemini_url_streaming(url, on_chunk))
-        .await
-        .map_err(|_| Error::Timeout)?
+    fetch_gemini_url_streaming_with_options(
+        url,
+        &FetchOptions {
+            timeout,
+            ..FetchOptions::default()
+        },
+        on_chunk,
+    )
+    .await
 }
 
 /// [`fetch_gemini_url_streaming_with_identity`] with a per-request timeout.
@@ -419,12 +504,16 @@ pub async fn fetch_gemini_url_streaming_timeout_with_identity<F>(
 where
     F: FnMut(BodyChunk<'_>),
 {
-    tokio::time::timeout(
-        timeout,
-        fetch_gemini_url_streaming_with_identity(url, identity, on_chunk),
+    fetch_gemini_url_streaming_with_identity_and_options(
+        url,
+        Some(identity),
+        &FetchOptions {
+            timeout,
+            ..FetchOptions::default()
+        },
+        on_chunk,
     )
     .await
-    .map_err(|_| Error::Timeout)?
 }
 
 #[cfg(test)]

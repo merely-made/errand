@@ -26,12 +26,12 @@ use crate::{Error, Response, Status};
 pub(crate) async fn fetch(
     url: &Url,
     identity: Option<gemini_protocol::ClientIdentity<'_>>,
+    options: &crate::FetchOptions,
 ) -> Result<Response, Error> {
-    let response = match identity {
-        Some(identity) => gemini_protocol::client::fetch_url_with_identity(url, identity).await,
-        None => gemini_protocol::client::fetch_url(url).await,
-    }
-    .map_err(map_error)?;
+    let response =
+        gemini_protocol::client::fetch_url_with_options(url, identity, &native_options(options))
+            .await
+            .map_err(map_error)?;
     Ok(into_errand_response(url, response))
 }
 
@@ -39,18 +39,19 @@ pub(crate) async fn fetch(
 pub(crate) async fn fetch_streaming<F>(
     url: &Url,
     identity: Option<gemini_protocol::ClientIdentity<'_>>,
+    options: &crate::FetchOptions,
     on_chunk: F,
 ) -> Result<Response, Error>
 where
     F: FnMut(&gemini_protocol::ResponseHead, &[u8]),
 {
-    let response = match identity {
-        Some(identity) => {
-            gemini_protocol::client::fetch_url_streaming_with_identity(url, identity, on_chunk)
-                .await
-        },
-        None => gemini_protocol::client::fetch_url_streaming(url, on_chunk).await,
-    }
+    let response = gemini_protocol::client::fetch_url_streaming_with_options(
+        url,
+        identity,
+        &native_options(options),
+        on_chunk,
+    )
+    .await
     .map_err(map_error)?;
     Ok(into_errand_response(url, response))
 }
@@ -92,10 +93,22 @@ pub(crate) fn map_error(error: gemini_protocol::ClientError) -> Error {
         Gemini::BadUrl(message) => Error::BadUrl(message),
         Gemini::Connect(message) => Error::Connect(message),
         Gemini::Io(message) => Error::Io(message),
+        Gemini::Timeout => Error::Timeout,
         Gemini::Protocol(message) => Error::Protocol(message),
         Gemini::CertificateChanged { host, pinned, seen } => {
             Error::CertificateChanged { host, pinned, seen }
-        },
+        }
+    }
+}
+
+pub(crate) fn native_options(
+    options: &crate::FetchOptions,
+) -> gemini_protocol::client::FetchOptions {
+    gemini_protocol::client::FetchOptions {
+        timeout: options.timeout,
+        max_request_bytes: options.max_request_bytes,
+        max_header_line_bytes: options.max_header_line_bytes,
+        max_body_bytes: options.max_body_bytes,
     }
 }
 

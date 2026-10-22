@@ -20,10 +20,13 @@
 //! For actual writes, call [`upload`] directly with the body bytes, MIME type,
 //! and optional token.
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use url::Url;
 
-use crate::client::{ClientError, ClientIdentity, Response, parse_response, tofu_connect_inner};
+use crate::client::{
+    ClientError, ClientIdentity, FetchOptions, Response, read_response_streaming,
+    tofu_connect_inner,
+};
 
 /// Titan shares gemini's port.
 pub const DEFAULT_PORT: u16 = 1965;
@@ -109,32 +112,62 @@ async fn upload_inner(
     options: UploadOptions,
 ) -> Result<Response, ClientError> {
     validate_request(url, body.len(), mime, token, options)?;
-    let host = url
-        .host_str()
-        .ok_or_else(|| ClientError::BadUrl("titan URL has no host".into()))?;
-    let port = url.port().unwrap_or(DEFAULT_PORT);
+    let max_request_bytes = body
+        .len()
+        .checked_add(1024)
+        .ok_or_else(|| ClientError::Protocol("Titan request size overflows".into()))?;
+    let bounds = FetchOptions {
+        max_request_bytes,
+        max_body_bytes: options.max_response_bytes,
+        ..FetchOptions::default()
+    };
+    upload_with_fetch_options(url, body, mime, token, identity, &bounds).await
+}
 
-    let request = request_line(url, body.len(), mime, token);
-
-    // Titan is Gemini's write companion on the same host and port. Reuse the
-    // exact TOFU handshake so a changed certificate is refused before a
-    // mutation request can leave the process.
-    let mut tls = tofu_connect_inner(host, port, identity).await?;
-
-    // Send request line + body.
-    tls.write_all(request.as_bytes())
-        .await
-        .map_err(|e| ClientError::Io(e.to_string()))?;
-    if !body.is_empty() {
+/// Upload with separate total request, response header/body, and whole deadline bounds.
+/// The Titan request line still cannot exceed its native 1024-byte ceiling.
+pub async fn upload_with_fetch_options(
+    url: &Url,
+    body: &[u8],
+    mime: &str,
+    token: Option<&str>,
+    identity: Option<ClientIdentity<'_>>,
+    options: &FetchOptions,
+) -> Result<Response, ClientError> {
+    tokio::time::timeout(options.timeout, async {
+        validate_request(
+            url,
+            body.len(),
+            mime,
+            token,
+            UploadOptions {
+                max_response_bytes: options.max_body_bytes.max(1),
+            },
+        )?;
+        let size = request_size(url, body.len(), mime, token);
+        if size > options.max_request_bytes
+            || body.len() > options.max_request_bytes.saturating_sub(size)
+        {
+            return Err(ClientError::Protocol(
+                "Titan request exceeds configured limit".into(),
+            ));
+        }
+        let request = request_line(url, body.len(), mime, token);
+        let host = url
+            .host_str()
+            .ok_or_else(|| ClientError::BadUrl("titan URL has no host".into()))?;
+        let port = url.port().unwrap_or(DEFAULT_PORT);
+        let mut tls = tofu_connect_inner(host, port, identity).await?;
+        tls.write_all(request.as_bytes())
+            .await
+            .map_err(|e| ClientError::Io(e.to_string()))?;
         tls.write_all(body)
             .await
             .map_err(|e| ClientError::Io(e.to_string()))?;
-    }
-
-    // Read and parse the Gemini-format response.
-    let raw = read_response(&mut tls, options.max_response_bytes).await?;
-
-    parse_response(&raw)
+        read_response_streaming(&mut tls, options, |_, _| {}).await
+    })
+    .await
+    .map_err(|_| ClientError::Timeout)?
 }
 
 fn validate_request(
@@ -163,7 +196,7 @@ fn validate_request(
             "Titan MIME and token fields contain a forbidden delimiter or control byte".into(),
         ));
     }
-    if request_line(url, body_len, mime, token).len() > 1024 {
+    if request_size(url, body_len, mime, token) > 1024 {
         return Err(ClientError::Protocol(
             "Titan request line exceeds 1024 bytes".into(),
         ));
@@ -177,25 +210,18 @@ fn field_is_safe(value: &str) -> bool {
         .all(|byte| (0x21..=0x7e).contains(&byte) && byte != b';')
 }
 
-async fn read_response<S: AsyncRead + Unpin>(
-    stream: &mut S,
-    max_body_bytes: usize,
-) -> Result<Vec<u8>, ClientError> {
-    let mut raw = Vec::new();
-    let read_limit = max_body_bytes
-        .checked_add(1)
-        .ok_or_else(|| ClientError::Protocol("Titan response limit is too large".into()))?;
-    stream
-        .take(read_limit as u64)
-        .read_to_end(&mut raw)
-        .await
-        .map_err(|e| ClientError::Io(e.to_string()))?;
-    if raw.len() > max_body_bytes {
-        return Err(ClientError::Protocol(
-            "Titan response exceeds configured limit".into(),
-        ));
-    }
-    Ok(raw)
+fn request_size(url: &Url, body_len: usize, mime: &str, token: Option<&str>) -> usize {
+    url.as_str()
+        .len()
+        .saturating_add(6)
+        .saturating_add(body_len.to_string().len())
+        .saturating_add(if mime.is_empty() {
+            0
+        } else {
+            6_usize.saturating_add(mime.len())
+        })
+        .saturating_add(token.map_or(0, |value| 7_usize.saturating_add(value.len())))
+        .saturating_add(2)
 }
 
 /// Build titan's request line:
@@ -290,10 +316,16 @@ mod tests {
     async fn response_reader_refuses_oversize_without_truncating() {
         let (mut reader, mut writer) = tokio::io::duplex(32);
         tokio::spawn(async move {
-            writer.write_all(b"12345").await.unwrap();
+            writer.write_all(b"20 text/plain\r\n12345").await.unwrap();
             writer.shutdown().await.unwrap();
         });
-        let error = read_response(&mut reader, 4).await.unwrap_err();
+        let options = FetchOptions {
+            max_body_bytes: 4,
+            ..Default::default()
+        };
+        let error = read_response_streaming(&mut reader, &options, |_, _| {})
+            .await
+            .unwrap_err();
         assert!(matches!(error, ClientError::Protocol(message) if message.contains("exceeds")));
     }
 
@@ -307,9 +339,33 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, ClientError::Protocol(message) if message.contains("delimiter")));
-        assert!(matches!(
-            listener.accept(),
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
-        ), "invalid request must not connect");
+        assert!(
+            matches!(
+                listener.accept(),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+            ),
+            "invalid request must not connect"
+        );
+    }
+    #[tokio::test]
+    async fn legacy_zero_response_limit_refuses_before_mutation_connection() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = Url::parse(&format!("titan://{}/write", listener.local_addr().unwrap())).unwrap();
+        let error = upload_with_options(
+            &url,
+            b"mutation",
+            "text/plain",
+            None,
+            UploadOptions {
+                max_response_bytes: 0,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, ClientError::Protocol(_)));
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
     }
 }

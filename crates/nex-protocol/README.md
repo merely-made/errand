@@ -64,3 +64,12 @@ selectors just close the connection, since nex has no error channel.
 
 MIT. The specification text declares no license; this implementation is
 original code.
+
+## Client bounds
+
+Client operations have a 30-second whole-operation deadline, including connection
+setup, and preserve their 16 MiB response-body default. Overflow returns an
+error rather than a truncated success. Bounds are enforced before body append. Existing feature and dependency boundaries remain unchanged.
+
+`FetchOptions` retains `max_body` and adds `max_request_bytes` (4096 by
+default). The request budget includes CRLF.

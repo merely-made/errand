@@ -17,6 +17,26 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use url::Url;
 
+/// Caller-owned bounds for one complete exchange, including connection setup.
+/// Byte budgets include CRLF for request/header lines; body bytes are separate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FetchOptions {
+    pub timeout: std::time::Duration,
+    pub max_request_bytes: usize,
+    pub max_header_line_bytes: usize,
+    pub max_body_bytes: usize,
+}
+impl Default for FetchOptions {
+    fn default() -> Self {
+        Self {
+            timeout: std::time::Duration::from_secs(30),
+            max_request_bytes: 1024,
+            max_header_line_bytes: 1024,
+            max_body_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
+
 /// Gemini's well-known port.
 pub const DEFAULT_PORT: u16 = 1965;
 
@@ -137,6 +157,8 @@ pub enum ClientError {
     Connect(String),
     /// A read or write failed mid-exchange.
     Io(String),
+    /// The whole exchange deadline expired.
+    Timeout,
     /// The response violated the grammar (no CRLF, a non-numeric status, an
     /// undefined status class, an over-long request).
     Protocol(String),
@@ -155,6 +177,7 @@ impl std::fmt::Display for ClientError {
             Self::BadUrl(m) => write!(f, "bad url: {m}"),
             Self::Connect(m) => write!(f, "connect: {m}"),
             Self::Io(m) => write!(f, "io: {m}"),
+            Self::Timeout => write!(f, "exchange timed out"),
             Self::Protocol(m) => write!(f, "protocol: {m}"),
             Self::CertificateChanged { host, pinned, seen } => write!(
                 f,
@@ -190,62 +213,109 @@ where
 pub async fn exchange_streaming<S, F>(
     url: &Url,
     stream: &mut S,
-    mut on_chunk: F,
+    on_chunk: F,
 ) -> Result<Response, ClientError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
     F: FnMut(&ResponseHead, &[u8]),
 {
-    let request = format!("{url}\r\n");
-    if request.len() > MAX_REQUEST {
-        return Err(ClientError::Protocol(format!(
-            "request exceeds {MAX_REQUEST} bytes"
-        )));
-    }
-    stream
-        .write_all(request.as_bytes())
-        .await
-        .map_err(|e| ClientError::Io(e.to_string()))?;
-    let mut header = Vec::new();
-    let mut head = None;
-    let mut body = Vec::new();
-    let mut chunk = [0_u8; 16 * 1024];
-    loop {
-        let read = stream
-            .read(&mut chunk)
+    exchange_streaming_with_options(url, stream, &FetchOptions::default(), on_chunk).await
+}
+
+/// Exchange with caller bounds; native 1024-byte request/header ceilings remain.
+pub async fn exchange_with_options<S>(
+    url: &Url,
+    stream: &mut S,
+    options: &FetchOptions,
+) -> Result<Response, ClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    exchange_streaming_with_options(url, stream, options, |_, _| {}).await
+}
+
+/// Bounded streaming exchange. Overflow is refused before append or callback.
+pub async fn exchange_streaming_with_options<S, F>(
+    url: &Url,
+    stream: &mut S,
+    options: &FetchOptions,
+    on_chunk: F,
+) -> Result<Response, ClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+    F: FnMut(&ResponseHead, &[u8]),
+{
+    tokio::time::timeout(options.timeout, async {
+        let max = options.max_request_bytes.min(MAX_REQUEST);
+        if url.as_str().len().saturating_add(2) > max {
+            return Err(ClientError::Protocol(format!(
+                "request exceeds {max} bytes"
+            )));
+        }
+        let request = format!("{url}\r\n");
+        stream
+            .write_all(request.as_bytes())
             .await
             .map_err(|e| ClientError::Io(e.to_string()))?;
-        if read == 0 {
+        read_response_streaming(stream, options, on_chunk).await
+    })
+    .await
+    .map_err(|_| ClientError::Timeout)?
+}
+
+pub(crate) async fn read_response_streaming<S, F>(
+    stream: &mut S,
+    options: &FetchOptions,
+    mut on_chunk: F,
+) -> Result<Response, ClientError>
+where
+    S: AsyncRead + Unpin,
+    F: FnMut(&ResponseHead, &[u8]),
+{
+    let max = options.max_header_line_bytes.min(MAX_RESPONSE_HEADER);
+    let mut header = Vec::new();
+    loop {
+        let mut byte = [0];
+        if stream
+            .read(&mut byte)
+            .await
+            .map_err(|e| ClientError::Io(e.to_string()))?
+            == 0
+        {
+            return Err(ClientError::Protocol("response header has no CRLF".into()));
+        }
+        if header.len() == max {
+            return Err(ClientError::Protocol(format!(
+                "response header exceeds {max} bytes"
+            )));
+        }
+        header.push(byte[0]);
+        if header.ends_with(b"\r\n") {
             break;
         }
-        let mut incoming = &chunk[..read];
-        if head.is_none() {
-            header.extend_from_slice(incoming);
-            let Some(split) = header.windows(2).position(|window| window == b"\r\n") else {
-                if header.len() >= MAX_RESPONSE_HEADER {
-                    return Err(ClientError::Protocol(format!(
-                        "response header exceeds {MAX_RESPONSE_HEADER} bytes"
-                    )));
-                }
-                continue;
-            };
-            if split + 2 > MAX_RESPONSE_HEADER {
+    }
+    let head = parse_response_head(&header[..header.len() - 2])?;
+    let mut body = Vec::new();
+    if head.status == Status::Success {
+        let mut chunk = [0; 16 * 1024];
+        loop {
+            let count = stream
+                .read(&mut chunk)
+                .await
+                .map_err(|e| ClientError::Io(e.to_string()))?;
+            if count == 0 {
+                break;
+            }
+            if count > options.max_body_bytes.saturating_sub(body.len()) {
                 return Err(ClientError::Protocol(format!(
-                    "response header exceeds {MAX_RESPONSE_HEADER} bytes"
+                    "response body exceeds {} bytes",
+                    options.max_body_bytes
                 )));
             }
-            let parsed = parse_response_head(&header[..split])?;
-            let body_start = split + 2;
-            incoming = &header[body_start..];
-            head = Some(parsed);
-        }
-        let parsed = head.as_ref().expect("response head parsed");
-        if parsed.status == Status::Success && !incoming.is_empty() {
-            on_chunk(parsed, incoming);
-            body.extend_from_slice(incoming);
+            on_chunk(&head, &chunk[..count]);
+            body.extend_from_slice(&chunk[..count]);
         }
     }
-    let head = head.ok_or_else(|| ClientError::Protocol("response header has no CRLF".into()))?;
     Ok(Response {
         status: head.status,
         code: head.code,
@@ -359,12 +429,46 @@ async fn fetch_url_streaming_inner<F>(
 where
     F: FnMut(&ResponseHead, &[u8]),
 {
-    let host = url
-        .host_str()
-        .ok_or_else(|| ClientError::BadUrl("gemini URL has no host".into()))?;
-    let port = url.port().unwrap_or(DEFAULT_PORT);
-    let mut stream = tofu_connect_inner(host, port, identity).await?;
-    exchange_streaming(url, &mut stream, on_chunk).await
+    fetch_url_streaming_with_options(url, identity, &FetchOptions::default(), on_chunk).await
+}
+
+/// TLS fetch with caller limits and an optional host-selected certificate.
+#[cfg(feature = "tls")]
+pub async fn fetch_url_with_options(
+    url: &Url,
+    identity: Option<ClientIdentity<'_>>,
+    options: &FetchOptions,
+) -> Result<Response, ClientError> {
+    fetch_url_streaming_with_options(url, identity, options, |_, _| {}).await
+}
+
+/// TLS streaming fetch; the deadline includes DNS, TCP, TOFU, and TLS.
+#[cfg(feature = "tls")]
+pub async fn fetch_url_streaming_with_options<F>(
+    url: &Url,
+    identity: Option<ClientIdentity<'_>>,
+    options: &FetchOptions,
+    on_chunk: F,
+) -> Result<Response, ClientError>
+where
+    F: FnMut(&ResponseHead, &[u8]),
+{
+    tokio::time::timeout(options.timeout, async {
+        let max = options.max_request_bytes.min(MAX_REQUEST);
+        if url.as_str().len().saturating_add(2) > max {
+            return Err(ClientError::Protocol(format!(
+                "request exceeds {max} bytes"
+            )));
+        }
+        let host = url
+            .host_str()
+            .ok_or_else(|| ClientError::BadUrl("gemini URL has no host".into()))?;
+        let port = url.port().unwrap_or(DEFAULT_PORT);
+        let mut stream = tofu_connect_inner(host, port, identity).await?;
+        exchange_streaming_with_options(url, &mut stream, options, on_chunk).await
+    })
+    .await
+    .map_err(|_| ClientError::Timeout)?
 }
 
 /// Open a TLS connection with trust-on-first-use pinning, without speaking

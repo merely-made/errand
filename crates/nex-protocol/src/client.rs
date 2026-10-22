@@ -11,10 +11,12 @@ use super::NEX_PORT;
 /// Options for a [`fetch`].
 #[derive(Debug, Clone)]
 pub struct FetchOptions {
-    /// Per-step timeout (connect, write, read). Default 30s.
+    /// Whole-exchange deadline, including connection setup. Default 30s.
     pub timeout: Duration,
     /// Refuse responses larger than this. Default 16 MiB.
     pub max_body: usize,
+    /// Complete request line, including CRLF. Default 4096 bytes.
+    pub max_request_bytes: usize,
     /// Connect here instead of resolving the URL's host. For tests and odd
     /// deployments.
     pub connect_addr: Option<std::net::SocketAddr>,
@@ -25,6 +27,7 @@ impl Default for FetchOptions {
         Self {
             timeout: Duration::from_secs(30),
             max_body: 16 * 1024 * 1024,
+            max_request_bytes: 4096,
             connect_addr: None,
         }
     }
@@ -38,6 +41,7 @@ pub enum ClientError {
     Io(String),
     Timeout(&'static str),
     BodyTooLarge { max: usize },
+    RequestTooLarge { max: usize },
 }
 
 impl std::fmt::Display for ClientError {
@@ -46,6 +50,7 @@ impl std::fmt::Display for ClientError {
             Self::BadUrl(message) => write!(formatter, "bad nex URL: {message}"),
             Self::Io(message) => write!(formatter, "nex IO error: {message}"),
             Self::Timeout(step) => write!(formatter, "nex {step} timed out"),
+            Self::RequestTooLarge { max } => write!(formatter, "nex request exceeds {max} bytes"),
             Self::BodyTooLarge { max } => {
                 write!(formatter, "nex response exceeds {max} bytes")
             }
@@ -79,43 +84,52 @@ pub async fn fetch_path(
     path: &str,
     options: &FetchOptions,
 ) -> Result<Vec<u8>, ClientError> {
-    let connect = async {
-        match options.connect_addr {
-            Some(addr) => TcpStream::connect(addr).await,
-            None => TcpStream::connect((host, port)).await,
+    tokio::time::timeout(options.timeout, async {
+        if path.len().saturating_add(2) > options.max_request_bytes {
+            return Err(ClientError::RequestTooLarge {
+                max: options.max_request_bytes,
+            });
         }
-    };
-    let mut stream = tokio::time::timeout(options.timeout, connect)
-        .await
-        .map_err(|_| ClientError::Timeout("connect"))?
-        .map_err(|error| ClientError::Io(error.to_string()))?;
-
-    let request = format!("{path}\r\n");
-    tokio::time::timeout(options.timeout, stream.write_all(request.as_bytes()))
-        .await
-        .map_err(|_| ClientError::Timeout("request write"))?
-        .map_err(|error| ClientError::Io(error.to_string()))?;
-
-    let read = async {
-        let mut body = Vec::new();
-        let mut chunk = [0u8; 8192];
-        loop {
-            let count = stream.read(&mut chunk).await?;
-            if count == 0 {
-                break;
+        let connect = async {
+            match options.connect_addr {
+                Some(addr) => TcpStream::connect(addr).await,
+                None => TcpStream::connect((host, port)).await,
             }
-            body.extend_from_slice(&chunk[..count]);
-            if body.len() > options.max_body {
-                return Ok::<_, std::io::Error>(None);
+        };
+        let mut stream = tokio::time::timeout(options.timeout, connect)
+            .await
+            .map_err(|_| ClientError::Timeout("connect"))?
+            .map_err(|error| ClientError::Io(error.to_string()))?;
+
+        let request = format!("{path}\r\n");
+        tokio::time::timeout(options.timeout, stream.write_all(request.as_bytes()))
+            .await
+            .map_err(|_| ClientError::Timeout("request write"))?
+            .map_err(|error| ClientError::Io(error.to_string()))?;
+
+        let read = async {
+            let mut body = Vec::new();
+            let mut chunk = [0u8; 8192];
+            loop {
+                let count = stream.read(&mut chunk).await?;
+                if count == 0 {
+                    break;
+                }
+                if count > options.max_body.saturating_sub(body.len()) {
+                    return Ok::<_, std::io::Error>(None);
+                }
+                body.extend_from_slice(&chunk[..count]);
             }
-        }
-        Ok(Some(body))
-    };
-    tokio::time::timeout(options.timeout, read)
-        .await
-        .map_err(|_| ClientError::Timeout("response read"))?
-        .map_err(|error| ClientError::Io(error.to_string()))?
-        .ok_or(ClientError::BodyTooLarge {
-            max: options.max_body,
-        })
+            Ok(Some(body))
+        };
+        tokio::time::timeout(options.timeout, read)
+            .await
+            .map_err(|_| ClientError::Timeout("response read"))?
+            .map_err(|error| ClientError::Io(error.to_string()))?
+            .ok_or(ClientError::BodyTooLarge {
+                max: options.max_body,
+            })
+    })
+    .await
+    .map_err(|_| ClientError::Timeout("exchange"))?
 }

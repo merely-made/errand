@@ -67,3 +67,15 @@ spartan serve --root ./site --listen 0.0.0.0:3000
 
 MIT. The spec repository declares no license for the specification text; this
 implementation is original code.
+
+## Client bounds
+
+Client operations have a 30-second whole-operation deadline, including connection
+setup, and preserve their 16 MiB response-body default. Overflow returns an
+error rather than a truncated success. Bounds are enforced before body append. Existing feature and dependency boundaries remain unchanged.
+
+`FetchOptions` retains `max_body` and adds `max_request_bytes` (4096 by
+default). The request budget includes CRLF and the upload payload.
+`max_header_line_bytes` defaults to 4096, including CRLF.
+The response status line is bounded separately and does not consume `max_body`.
+Explicit submit budgets count the outgoing line and data block together.
