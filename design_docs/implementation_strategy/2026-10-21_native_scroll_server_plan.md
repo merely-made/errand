@@ -1,6 +1,6 @@
 # Native Scroll response and connection exchange
 
-**Status (2026-10-21):** supplier qualified; Knot adoption in progress. Existing Knot publication is the forcing
+**Status (2026-10-21):** landed; supplier and Knot encoder adoption qualified. Existing Knot publication is the forcing
 consumer. This slice adds a native protocol seam; governed resident Scroll
 hosting remains a later Mere/Djinn gate.
 
@@ -71,3 +71,12 @@ source/test results only, under a shared 100 MB cap across this orchestration.
   TLS documentation now compile without TLS; a pre-existing test-only useless
   `format!` is simplified. No lock change or new isolated resource is required.
   [Supplier receipt](../../support/receipts/native-scroll-server/supplier.json).
+- 2026-10-21: supplier `3d2ce3a5` and Knot receiver `02c5a2d` are published.
+  The two original donor tests pass unchanged within the 22-case standalone
+  publication/history suite, including actual trusted local TLS. The ordinary
+  root check and strict library/bin Clippy pass. Author-byte and accepted long
+  timestamp regressions preserve existing model acceptance. All non-Errand Git
+  suppliers stay fixed; the older transitive Errand behind Knot's existing Mere
+  cohort remains explicitly scoped. Consumer evidence:
+  `knot-editor/support/receipts/native-scroll-server/consumer.json`.
+  Native governed Scroll residency and browser MIME receiving remain separate.
