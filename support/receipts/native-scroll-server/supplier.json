@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "recorded_at": "2026-10-22T03:19:18Z",
+  "source_basis": "50702b440ccbf0f0f6e51b37420b9e81cf3b3387",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "receipt_cap_bytes": 100000000,
+  "scope": "Native Scroll reply codec and optional one-connection server exchange; caller owns TLS, acceptance, authority and task lifetime",
+  "source_sha256": {
+    "Cargo.lock": "129bf844a2fc12c01a2cf58a01b00bb9a3829e92c422c2a4086bd66228925bda",
+    "crates/scroll-protocol/Cargo.toml": "d9596af85ad9ab9f6eae5caac79a0f2956665407c3bf3d4825eee1c7db628e96",
+    "crates/scroll-protocol/src/lib.rs": "938ed09f5b739d73a44ab54bb94984a6b53b8379b43ba5eea66d9473571ed167",
+    "crates/scroll-protocol/src/wire.rs": "02dc881169d2a0a2e8456f0ea0118c73316bd8b55e265eb2cfbcb982ccf554db",
+    "crates/scroll-protocol/src/server.rs": "0526535b05adf26a83e602d6baffd6ac6de63dbdb93fc1058efc3f748c55b9b0",
+    "crates/scroll-protocol/src/client.rs": "430bd712ce8cbbd565f33cbfb3677a1b46dc7f233e62d1801e61a395a86f7d71",
+    "crates/scroll-protocol/src/scrolltext.rs": "4c02c3dde05837c257544b16c3aeab113ee7e017f44256fc017f6a779ea7a8f7"
+  },
+  "environment": {
+    "CARGO_TARGET_DIR": "C:\\t\\cargo-targets\\smolweb",
+    "CARGO_BUILD_BUILD_DIR": "C:\\t\\cargo-targets\\smolweb\\build"
+  },
+  "gates": [
+    {
+      "command": "cargo test -p scroll-protocol --no-default-features --offline --quiet",
+      "unit": 32,
+      "doc": 1,
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p scroll-protocol --no-default-features --features server --offline --quiet",
+      "unit": 38,
+      "doc": 1,
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p scroll-protocol --no-default-features --features server,client --offline --quiet",
+      "unit": 43,
+      "doc": 2,
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p scroll-protocol --all-features --offline --quiet",
+      "unit": 43,
+      "doc": 2,
+      "exit_code": 0
+    },
+    {
+      "command": "cargo clippy -p scroll-protocol --no-default-features --features server,client --all-targets --offline --no-deps -- -D warnings",
+      "exit_code": 0
+    }
+  ],
+  "controls": [
+    "Exact full/abstract reply bytes including native success metadata, Unicode and CRLF",
+    "Ordered language preferences and abstract flag reach native handler unchanged",
+    "Malformed/oversized requests refuse before handler",
+    "Invalid/injected headers, inconsistent status and response bounds refuse before output",
+    "Whole exchange deadline includes request, async handler, blocked write and flush",
+    "Cancellation drops inline handler work; no listener or detached task"
+  ],
+  "feature_fixes": "Existing client-only doctest and import required cfg(tls); existing useless format in parser test simplified for strict Clippy",
+  "lock_unchanged": true,
+  "limits": [
+    "No TLS listener or governed host restart qualification added",
+    "Host closes borrowed stream on completion/refusal/cancellation",
+    "Synchronous handler work needs its own preemption",
+    "No language selection policy or multilingual snapshot model"
+  ],
+  "resources": {
+    "new_worktrees": 0,
+    "new_cargo_homes": 0,
+    "stable_target": "C:\\t\\cargo-targets\\smolweb",
+    "retained_full_logs": 0
+  }
+}

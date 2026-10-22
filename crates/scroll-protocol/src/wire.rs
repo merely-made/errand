@@ -195,7 +195,118 @@ pub enum Header {
     Success(SuccessHeader),
     /// Every non-`2x` class: the code and its description. For `1x` the
     /// description is the input prompt.
-    Meta { code: u8, status: Status, meta: String },
+    Meta {
+        code: u8,
+        status: Status,
+        meta: String,
+    },
+}
+
+/// A native response, ready for a caller-owned transport. An abstract response
+/// uses the same header and puts the exact abstract bytes in `body`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reply {
+    pub header: Header,
+    pub body: Vec<u8>,
+}
+
+/// Host-selected response limits. Header limits include each line's CRLF.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResponseLimits {
+    pub max_header_line_bytes: usize,
+    pub max_body_bytes: usize,
+}
+
+impl Default for ResponseLimits {
+    fn default() -> Self {
+        Self {
+            max_header_line_bytes: 4096,
+            max_body_bytes: 1024 * 1024,
+        }
+    }
+}
+
+/// A response cannot be represented faithfully within the supplied limits.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MalformedReply(pub String);
+
+impl std::fmt::Display for MalformedReply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid scroll reply: {}", self.0)
+    }
+}
+
+impl std::error::Error for MalformedReply {}
+
+impl Reply {
+    /// Validate before producing any wire bytes. Header fields must be single
+    /// lines without control characters; dates stay verbatim, as in
+    /// [`SuccessHeader`]. Content metadata semantics belong to the publisher.
+    /// The encoder does not select a language, document, or abstract.
+    pub fn encode(&self, limits: ResponseLimits) -> Result<Vec<u8>, MalformedReply> {
+        let invalid = |message: &str| MalformedReply(message.into());
+        if self.body.len() > limits.max_body_bytes {
+            return Err(invalid("body exceeds host limit"));
+        }
+        let mut lines = Vec::with_capacity(4);
+        match &self.header {
+            Header::Success(header) => {
+                if UdcClass::from_code(header.code).is_none()
+                    || header.mimetype.is_empty()
+                    || header.mimetype.trim() != header.mimetype
+                    || !valid_media_type(&header.mimetype)
+                {
+                    return Err(invalid("invalid success code or MIME metadata"));
+                }
+                lines.push(format!("{} {}", header.code, header.mimetype));
+                lines.push(header.author.clone().unwrap_or_default());
+                lines.push(header.published.clone().unwrap_or_default());
+                lines.push(header.modified.clone().unwrap_or_default());
+            }
+            Header::Meta { code, status, meta } => {
+                if Status::from_code(*code) != Some(*status) || *status == Status::Success {
+                    return Err(invalid("invalid or inconsistent status code"));
+                }
+                if !self.body.is_empty() {
+                    return Err(invalid("a non-success response cannot carry a body"));
+                }
+                lines.push(format!("{code} {meta}"));
+            }
+        }
+        for line in &lines {
+            if line.chars().any(char::is_control) {
+                return Err(invalid("a header field contains a control character"));
+            }
+            if line
+                .len()
+                .checked_add(2)
+                .is_none_or(|length| length > limits.max_header_line_bytes)
+            {
+                return Err(invalid("header line exceeds host limit"));
+            }
+        }
+        let mut out = Vec::new();
+        for line in lines {
+            out.extend_from_slice(line.as_bytes());
+            out.extend_from_slice(b"\r\n");
+        }
+        out.extend_from_slice(&self.body);
+        Ok(out)
+    }
+}
+
+fn valid_media_type(value: &str) -> bool {
+    let essence = value.split(';').next().unwrap_or("").trim_end();
+    let Some((kind, subtype)) = essence.split_once('/') else {
+        return false;
+    };
+    let token = |part: &str| {
+        !part.is_empty()
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
+    };
+    token(kind) && token(subtype)
 }
 
 /// What a malformed header looked like.
@@ -222,7 +333,11 @@ pub fn parse_status_line(line: &str) -> Result<(u8, Status, String), MalformedHe
     }
     let code = (bytes[0] - b'0') * 10 + (bytes[1] - b'0');
     let status = Status::from_code(code).ok_or_else(bad)?;
-    Ok((code, status, line.get(2..).unwrap_or("").trim_start().to_string()))
+    Ok((
+        code,
+        status,
+        line.get(2..).unwrap_or("").trim_start().to_string(),
+    ))
 }
 
 /// Assemble a [`SuccessHeader`] from the status line's parts and the three
@@ -292,10 +407,22 @@ mod tests {
     #[test]
     fn status_codes_are_geminis() {
         assert_eq!(parse_status_line("10 Name?").unwrap().1, Status::Input);
-        assert_eq!(parse_status_line("31 scroll://x/moved").unwrap().1, Status::Redirect);
-        assert_eq!(parse_status_line("44 slow down").unwrap().1, Status::TemporaryFailure);
-        assert_eq!(parse_status_line("51 gone").unwrap().1, Status::PermanentFailure);
-        assert_eq!(parse_status_line("60 cert").unwrap().1, Status::CertificateRequired);
+        assert_eq!(
+            parse_status_line("31 scroll://x/moved").unwrap().1,
+            Status::Redirect
+        );
+        assert_eq!(
+            parse_status_line("44 slow down").unwrap().1,
+            Status::TemporaryFailure
+        );
+        assert_eq!(
+            parse_status_line("51 gone").unwrap().1,
+            Status::PermanentFailure
+        );
+        assert_eq!(
+            parse_status_line("60 cert").unwrap().1,
+            Status::CertificateRequired
+        );
         assert!(parse_status_line("70 nope").is_err(), "scroll has no 7x");
         assert!(parse_status_line("xx nope").is_err());
     }
@@ -326,5 +453,124 @@ mod tests {
         assert_eq!(header.published.as_deref(), Some("2025-07-23T20:50:51Z"));
         assert_eq!(header.modified, None, "a blank line is unspecified");
         assert_eq!(header.class(), Some(UdcClass::Science));
+    }
+
+    fn native_reply() -> Reply {
+        Reply {
+            header: Header::Success(SuccessHeader {
+                code: 27,
+                mimetype: "text/scroll;charset=utf-8;lang=fr".into(),
+                author: Some("Écrivain".into()),
+                published: Some("2026-10-21T12:00:00Z".into()),
+                modified: None,
+            }),
+            body: b"# Title\r\nSaved bytes\r\n".to_vec(),
+        }
+    }
+
+    #[test]
+    fn native_reply_preserves_every_line_and_exact_body() {
+        let reply = native_reply();
+        assert_eq!(reply.encode(ResponseLimits::default()).unwrap(),
+            "27 text/scroll;charset=utf-8;lang=fr\r\nÉcrivain\r\n2026-10-21T12:00:00Z\r\n\r\n# Title\r\nSaved bytes\r\n".as_bytes());
+        let abstract_reply = Reply {
+            body: b"# Abstract\n".to_vec(),
+            ..reply
+        };
+        assert!(
+            abstract_reply
+                .encode(ResponseLimits::default())
+                .unwrap()
+                .ends_with(b"\r\n\r\n# Abstract\n")
+        );
+    }
+
+    #[test]
+    fn reply_limits_include_crlf_and_refuse_before_encoding() {
+        let reply = native_reply();
+        let line_bytes = "27 text/scroll;charset=utf-8;lang=fr\r\n".len();
+        let limits = ResponseLimits {
+            max_header_line_bytes: line_bytes,
+            max_body_bytes: reply.body.len(),
+        };
+        assert!(reply.encode(limits).is_ok());
+        assert!(
+            reply
+                .encode(ResponseLimits {
+                    max_header_line_bytes: line_bytes - 1,
+                    ..limits
+                })
+                .is_err()
+        );
+        assert!(
+            reply
+                .encode(ResponseLimits {
+                    max_body_bytes: reply.body.len() - 1,
+                    ..limits
+                })
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn reply_rejects_header_injection_and_invalid_native_metadata() {
+        for field in 0..4 {
+            let mut reply = native_reply();
+            let Header::Success(header) = &mut reply.header else {
+                unreachable!()
+            };
+            match field {
+                0 => header.mimetype.push_str("\r\n51 injected"),
+                1 => header.author = Some("writer\nother".into()),
+                2 => header.published = Some("date\rnext".into()),
+                _ => header.modified = Some("date\0next".into()),
+            }
+            assert!(reply.encode(ResponseLimits::default()).is_err());
+        }
+        for mime in ["", " text/scroll", "text", "text/", "text/scroll extra"] {
+            let mut reply = native_reply();
+            let Header::Success(header) = &mut reply.header else {
+                unreachable!()
+            };
+            header.mimetype = mime.into();
+            assert!(reply.encode(ResponseLimits::default()).is_err(), "{mime:?}");
+        }
+        let mut reply = native_reply();
+        let Header::Success(header) = &mut reply.header else {
+            unreachable!()
+        };
+        header.code = 30;
+        assert!(reply.encode(ResponseLimits::default()).is_err());
+    }
+
+    #[test]
+    fn non_success_has_one_line_and_no_body() {
+        let mut reply = Reply {
+            header: Header::Meta {
+                code: 51,
+                status: Status::PermanentFailure,
+                meta: "Not found".into(),
+            },
+            body: vec![],
+        };
+        assert_eq!(
+            reply.encode(ResponseLimits::default()).unwrap(),
+            b"51 Not found\r\n"
+        );
+        reply.body.push(1);
+        assert!(reply.encode(ResponseLimits::default()).is_err());
+        reply.body.clear();
+        reply.header = Header::Meta {
+            code: 51,
+            status: Status::Input,
+            meta: String::new(),
+        };
+        assert!(reply.encode(ResponseLimits::default()).is_err());
+        reply.header = Header::Meta {
+            code: 20,
+            status: Status::Success,
+            meta: "text/scroll".into(),
+        };
+        assert!(reply.encode(ResponseLimits::default()).is_err());
     }
 }

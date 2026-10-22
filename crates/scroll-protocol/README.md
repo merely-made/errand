@@ -41,14 +41,30 @@ The spec titles itself *speculative*; expect revisions.
 | wire grammar + scrolltext | always on | nothing |
 | `exchange` over any stream | `client` | tokio |
 | `fetch` with TLS + TOFU | `tls` *(default)* | gemini-protocol |
+| `server::serve_connection` over a caller-owned stream | `server` | tokio, url |
 
 The TLS half deliberately rides `gemini_protocol::tofu_connect`: scroll's spec
 says "TOFU is used, similarly to Gemini", so the two protocols share one trust
 seam, and a host that installs a `TofuStore` has installed it for both.
 
+`wire::Reply::encode(ResponseLimits)` is always available, including to blocking
+transport owners. It preserves native success classification, MIME/language,
+author, dates and exact body or abstract bytes, and refuses header injection,
+invalid response envelopes and host byte limits before producing bytes.
+Header line limits include CRLF; date strings remain verbatim.
+
+With `server`, `serve_connection` reads one bounded CRLF request and writes and
+flushes one validated reply. Its host-selected deadline covers the handler and
+I/O. The caller supplies the connected stream, closes it afterwards, and owns
+TLS, addressing, certificates, admission and task cancellation. The crate opens
+no listener and spawns no task. Dropping the exchange future stops its work.
+Language preferences and the abstract flag reach the handler intact; the
+handler owns content selection. A host with one declared language per page can
+keep that policy without the wire layer inventing language negotiation.
+
 ## Not implemented
 
-A server; client certificates (including the spec's misfin-certificate
+A listener or TLS/certificate owner; client certificates (including the spec's misfin-certificate
 convention); and the inline-toggle exception between two **non-ASCII** symbols,
 which needs Unicode category tables this crate does not carry — the ASCII cases
 are honoured and the limitation is recorded in the docs.

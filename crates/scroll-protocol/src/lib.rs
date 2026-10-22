@@ -38,6 +38,7 @@
 //! | [`wire`] + [`scrolltext`] | always on | nothing |
 //! | [`client::exchange`] over any stream | `client` | tokio |
 //! | [`client::fetch`] with TLS + TOFU | `tls` *(default)* | gemini-protocol |
+//! | [`server::serve_connection`] over a caller-owned stream | `server` | tokio, url |
 //!
 //! The TLS half deliberately rides
 //! [`gemini_protocol::tofu_connect`]: scroll's spec says "TOFU is used,
@@ -47,7 +48,7 @@
 //!
 //! ## Not implemented
 //!
-//! A server; client certificates (the spec's misfin-certificate convention
+//! A listener or TLS/certificate owner; client certificates (the spec's misfin-certificate convention
 //! included); and the inline-markup exception for toggles between two
 //! **non-ASCII** symbols, which needs Unicode category tables this crate does
 //! not carry — the ASCII cases are honoured and the limitation is recorded on
@@ -61,10 +62,13 @@ pub mod wire;
 #[cfg(feature = "client")]
 pub mod client;
 
+#[cfg(feature = "server")]
+pub mod server;
+
 pub use scrolltext::{Polarity, Relation, ScrollLine, Span, SpanKind, spans};
 pub use wire::{
-    DEFAULT_PORT, Header, MalformedHeader, Request, Status, SuccessHeader, UdcClass,
-    finish_success, parse_request, parse_status_line, request_line,
+    DEFAULT_PORT, Header, MalformedHeader, MalformedReply, Reply, Request, ResponseLimits, Status,
+    SuccessHeader, UdcClass, finish_success, parse_request, parse_status_line, request_line,
 };
 
 #[cfg(feature = "client")]

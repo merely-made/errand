@@ -8,6 +8,7 @@
 //! for both protocols.
 //!
 //! ```no_run
+//! # #[cfg(feature = "tls")]
 //! # async fn run() -> Result<(), scroll_protocol::ClientError> {
 //! let page = scroll_protocol::fetch("scroll://example.net/", &["en"], false).await?;
 //!
@@ -23,9 +24,9 @@
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::wire::{
-    DEFAULT_PORT, Header, Status, finish_success, parse_status_line, request_line,
-};
+#[cfg(feature = "tls")]
+use crate::wire::DEFAULT_PORT;
+use crate::wire::{Header, Status, finish_success, parse_status_line, request_line};
 
 /// What can go wrong.
 #[derive(Clone, Debug, PartialEq, Eq)]

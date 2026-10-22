@@ -19,6 +19,7 @@ readme = "README.md"
 default = ["tls"]
 client = ["dep:tokio", "dep:url"]
 tls = ["client", "gemini-protocol/tls"]
+server = ["dep:tokio", "dep:url", "tokio/time"]
 
 [dependencies]
 url = { version = "2.5", optional = true }

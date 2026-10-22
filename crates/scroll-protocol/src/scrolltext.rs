@@ -564,7 +564,7 @@ mod tests {
 
     #[test]
     fn a_zero_width_space_counts_as_whitespace_for_toggles() {
-        let line = format!("a\u{200B}*\u{200B}b");
+        let line = "a\u{200B}*\u{200B}b".to_string();
         assert_eq!(spans(&line).len(), 1, "the star must stay literal");
     }
 
