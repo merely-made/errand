@@ -80,3 +80,15 @@ source/test results only, under a shared 100 MB cap across this orchestration.
   cohort remains explicitly scoped. Consumer evidence:
   `knot-editor/support/receipts/native-scroll-server/consumer.json`.
   Native governed Scroll residency and browser MIME receiving remain separate.
+- 2026-10-22: Djinn's governed Scroll host is now qualified and published through
+  Mere `8fdaf822c`, with Knot receiving record `19959b9`. The supplier remains
+  `3d2ce3a5`; this continuation adds no protocol API or package release. A clean
+  Windows receiving build, 13 focused host controls and both real product
+  process fixtures pass. Scroll preserves literal full/abstract replies and V1
+  metadata, current authority, certificate continuity and joined cancellation
+  with publisher/editor state absent from the host. Canonical evidence lives at
+  `mere/support/receipts/scroll-publication-runtime/native.json` and
+  `knot-editor/support/receipts/scroll-publication-runtime/process.json`.
+  The long-date proof reads raw trusted TLS. The current client's separate
+  4096-byte response-line cap and browser MIME/trust receiving remain open gates;
+  native host qualification does not establish their acceptance.
