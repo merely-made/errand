@@ -4,8 +4,9 @@
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
 size and framing limits, native session operation deadlines, and Misfin sending
 and receiving deadlines. Whole-transaction and per-step policy remain
-independently configurable. Connection admission and joined listener shutdown
-remain a separate lane.
+independently configurable. Phase 9, native Misfin connection admission and
+joined listener shutdown, is in progress; sibling lifecycle policies stay
+separately scoped.
 
 ## Ownership and scope
 
@@ -113,10 +114,45 @@ receipts. New receipt hashes must state their Git/native byte convention.
    Connection admission, joined listener shutdown, other protocol servers,
    product repins and product mail UI remain separately scoped.
 
+9. Bound native Misfin connection admission and join accepted work on shutdown.
+   Add configurable `max_connections` (default 32, nonzero) and `shutdown_grace`
+   (default 5s, zero requests immediate cancellation). Admission pauses accept
+   before spawning at capacity; pending peers are subject to OS backlog limits.
+   Track and reap completed, failed and panicked tasks. Observe shutdown before
+   new admission, close the listener, drain for one fixed grace window, then
+   abort remaining tasks and await every terminal join before returning.
+   Existing per-transaction budgets remain independent and mailbox commits
+   survive cancellation. Signal shutdown and await `serve` for the joined
+   guarantee; dropping the future can request abort but cannot await cleanup.
+   Done when actual TCP/TLS and controlled-task tests qualify saturation,
+   capacity reuse, graceful mail completion, immediate/expired-grace cancellation,
+   drop-before-return, panic handling and fixed total grace; independent feature
+   graphs and strict Misfin Clippy pass on exact-source/lock receipts. Keep
+   sibling server policy, Errand adapters, Djinn/Armillary, product pins and
+   receiving deadline/framing semantics unchanged. Shared receipt cap 100 MB;
+   explicitly set both approved Cargo target and build-directory variables.
+
 ## Findings
 
 ### 2026-10-23
 
+- The native family survey finds detached accepted tasks in Misfin, Gemini,
+  Gopher, Finger, Nex and Spartan. Their handler and I/O deadlines differ, so
+  this phase qualifies Misfin first. Guppy's inline UDP loop already bounds
+  peer sessions; its inline handler/shutdown responsiveness is separate work.
+  Scroll and Scorpion exchange over caller-owned streams and must retain that
+  ownership. Errand's `serve` adapters do not own listener lifetime.
+- Djinn already composes native exchanges with host-owned policy, capacity
+  controls and Armillary `ResidentTasks::close_and_join` in
+  `mere/ports/djinn/src/resident_site.rs`, `moot_site.rs` and `micron_site.rs`.
+  The native Misfin listener uses its existing Tokio dependency to own a local
+  bounded task set; this adds no generic runtime or dependency on host actors.
+  At capacity, native Misfin pauses acceptance rather than fabricating a mail
+  reply. Host-specific overload and residency policy remains independently owned.
+- The joined guarantee requires cooperative connection futures. Synchronous
+  mailbox work cannot be preempted by abort or a grace timer; after grace,
+  cancellation is requested and terminal joins are still awaited. Dropping an
+  async serve future cannot perform asynchronous joining.
 - Misfin receiving's former 30-second read timer restarted per byte; TLS,
   response write and close were unbounded. The receiving deadline now starts
   at acceptance and is independent of sending policy. Invalid durations are
@@ -130,9 +166,9 @@ receipts. New receipt hashes must state their Git/native byte convention.
   delivery already committed. Cancellation has the same uncertainty boundary.
   Bare LF inside a message remains valid; strip only the final observed CRLF,
   preserving trailing message newlines that the old trimming discarded.
-- The existing listener still spawns one task per accepted connection and
-  stops accepting when its shutdown future resolves. Receiving deadlines do
-  not establish connection admission limits or joined task shutdown.
+- Phase 8 left one detached task per accepted connection, stopping acceptance
+  when its shutdown future resolved. Its deadline qualification did not cover
+  connection admission or joined task shutdown; phase 9 owns those controls.
 - Misfin's four existing timers bound connect, TLS, write and full response
   reads independently; both success and pin-mismatch shutdown paths were
   unbounded. A fixed send deadline clamps each step, including cleanup, without
@@ -232,6 +268,14 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: started phase 9 on smolweb main. Root owns native Misfin production,
+  docs and qualification; bounded Luna lanes survey sibling ownership and write
+  lifecycle tests. Required receipts are actual native acceptance/shutdown,
+  controlled task cleanup and exact source/lock/build/Clippy results within the
+  shared 100 MB cap. Existing receiving receipts and the previously blocked
+  preliminary cache are preserved. Reuse `C:/t/cargo-targets/smolweb` and its
+  `build` directory, with both environment variables explicitly set.
 
 - 2026-10-23: receiving source `2a2dbac2` completes phase 8. The final combined
   gate passes 141 unit tests, 14 integration tests and one doctest, with the

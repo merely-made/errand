@@ -142,9 +142,32 @@ committed message. The sender may therefore have an unknown delivery outcome.
 These are cooperative deadlines; late ready completions are refused.
 
 Receiving policy is independent of `SendOptions` and changes no mailbox trust
-or identity rules. The listener's existing task spawning and shutdown behavior
-remains: connection admission limits and joining accepted tasks on shutdown
-need their separate host lifecycle slice.
+or identity rules.
+
+## Connection admission and shutdown
+
+`MisfinServerConfig::max_connections` defaults to 32 accepted connection tasks,
+including TLS handshakes. Set a nonzero limit before `MisfinServer::new`.
+At capacity, the listener pauses acceptance until a tracked task is reaped;
+pending peers are subject to OS backlog limits. This creates no unbounded set
+of tasks or invented mail status. Completion, failure and panic
+release tracked capacity. A queued peer's receiving deadline starts only when
+its TCP connection is accepted.
+
+`shutdown_grace` defaults to five seconds. When the shutdown future resolves,
+`serve` stops admission and drops the listener, then allows existing connections
+one fixed grace window to finish. It aborts remaining tasks after that window
+and awaits all terminal joins before returning. Zero grace requests immediate
+abortion and still joins. Unrepresentable grace and a zero connection limit
+fail as configuration errors before TLS setup or binding.
+
+Signal shutdown and await `serve` for that joined guarantee. Dropping its future
+drops the owned task set and requests abortion, but cannot synchronously await
+cleanup. Abort and grace are cooperative: synchronous mailbox work can delay
+cancellation, and a committed message remains stored even if shutdown prevents
+its acknowledgement. The grace window is separate from per-step and whole
+receiving deadlines. Other native protocol servers and host residency policy
+retain their own lifecycle contracts.
 
 ## License
 

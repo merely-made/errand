@@ -27,8 +27,8 @@
 //! the certificate's USER_ID + SUBJECT_ALT_NAME so deliveries record a
 //! human-readable sender address.
 //!
-//! The server is host-neutral: it owns no scheduling. `serve` runs until the
-//! supplied shutdown future resolves, so a host just spawns it on its runtime.
+//! The host supplies the runtime and shutdown signal. `serve` bounds accepted
+//! connection work and joins it before returning after shutdown.
 
 use std::future::Future;
 use std::io;
@@ -42,6 +42,7 @@ use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, DistinguishedName, SignatureScheme};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::{JoinError, JoinSet};
 use tokio::time::Instant;
 use tokio_rustls::TlsAcceptor;
 
@@ -53,6 +54,8 @@ use super::{
 
 const DEFAULT_RECEIVE_STEP_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(120);
+const DEFAULT_MAX_CONNECTIONS: usize = 32;
+const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 /// A gemini-shaped misfin reply: a two-digit `status` and a `meta` string,
 /// encoded as `<status> <meta>\r\n`.
@@ -110,6 +113,14 @@ pub struct MisfinServerConfig {
     /// close-notify. Default 120 seconds, independent of the step allowance.
     /// Both durations must be nonzero and representable by the monotonic clock.
     pub receive_timeout: Duration,
+    /// Maximum accepted connection tasks, including TLS handshakes. Default 32.
+    /// Must be nonzero. At capacity, accept pauses; pending peers are subject
+    /// to OS backlog limits. No mail response is invented for overload.
+    pub max_connections: usize,
+    /// One graceful-drain allowance after shutdown is observed. Default 5s.
+    /// Zero aborts immediately. Remaining tasks are aborted and joined after
+    /// this window; cooperative cancellation cannot preempt synchronous storage.
+    pub shutdown_grace: Duration,
 }
 
 impl MisfinServerConfig {
@@ -128,8 +139,29 @@ impl MisfinServerConfig {
             reject_changed_sender: true,
             timeout: DEFAULT_RECEIVE_STEP_TIMEOUT,
             receive_timeout: DEFAULT_RECEIVE_TIMEOUT,
+            max_connections: DEFAULT_MAX_CONNECTIONS,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
         }
     }
+}
+
+fn validate_lifecycle(max_connections: usize, shutdown_grace: Duration) -> io::Result<()> {
+    if max_connections == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid misfin connection limit",
+        ));
+    }
+    if std::time::Instant::now()
+        .checked_add(shutdown_grace)
+        .is_none()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid misfin shutdown grace",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_receive_timeouts(timeout: Duration, receive_timeout: Duration) -> io::Result<()> {
@@ -338,6 +370,8 @@ pub struct MisfinServer {
     dispatcher: Arc<Dispatcher>,
     timeout: Duration,
     receive_timeout: Duration,
+    max_connections: usize,
+    shutdown_grace: Duration,
 }
 
 impl MisfinServer {
@@ -345,6 +379,8 @@ impl MisfinServer {
     /// TLS acceptor (a client-cert-requesting, TOFU-permissive handshake); fails
     /// if timeouts are zero/unrepresentable or certificate/key are unusable.
     pub fn new(config: MisfinServerConfig, store: MailboxStore) -> Result<Self, MisfinServerError> {
+        validate_lifecycle(config.max_connections, config.shutdown_grace)
+            .map_err(|error| MisfinServerError::Config(error.to_string()))?;
         validate_receive_timeouts(config.timeout, config.receive_timeout)
             .map_err(|error| MisfinServerError::Config(error.to_string()))?;
         let cert = CertificateDer::from(config.tls_certificate_der);
@@ -365,6 +401,8 @@ impl MisfinServer {
             }),
             timeout: config.timeout,
             receive_timeout: config.receive_timeout,
+            max_connections: config.max_connections,
+            shutdown_grace: config.shutdown_grace,
         })
     }
 
@@ -380,6 +418,8 @@ impl MisfinServer {
             listener,
             timeout: self.timeout,
             receive_timeout: self.receive_timeout,
+            max_connections: self.max_connections,
+            shutdown_grace: self.shutdown_grace,
         })
     }
 }
@@ -392,6 +432,8 @@ pub struct BoundMisfinServer {
     listener: TcpListener,
     timeout: Duration,
     receive_timeout: Duration,
+    max_connections: usize,
+    shutdown_grace: Duration,
 }
 
 impl BoundMisfinServer {
@@ -402,20 +444,43 @@ impl BoundMisfinServer {
             .map_err(|error| MisfinServerError::Io(error.to_string()))
     }
 
-    /// Accept connections until `shutdown` resolves. Each connection is handled
-    /// on its own task; a handshake or read failure drops that connection only.
+    /// Accept at most the configured number of connection tasks concurrently.
+    /// Shutdown closes the listener, drains connections for one grace window,
+    /// then aborts and joins any remaining tasks before returning.
+    ///
+    /// Signal shutdown and await this future for the joined guarantee. Dropping
+    /// it requests abortion through the owned task set, but cannot await joins.
+    /// Cancellation never rolls back mail already committed by a connection.
     pub async fn serve(self, shutdown: impl Future<Output = ()>) -> Result<(), MisfinServerError> {
+        let Self {
+            listener,
+            acceptor,
+            dispatcher,
+            timeout,
+            receive_timeout,
+            max_connections,
+            shutdown_grace,
+        } = self;
+        let mut connections = JoinSet::new();
         tokio::pin!(shutdown);
-        loop {
+        let (outcome, stopped_at) = loop {
             tokio::select! {
-                _ = &mut shutdown => break,
-                accepted = self.listener.accept() => match accepted {
+                biased;
+                _ = &mut shutdown => break (Ok(()), Instant::now()),
+                joined = connections.join_next(), if !connections.is_empty() => {
+                    if let Some(result) = joined {
+                        report_connection_join(result);
+                    }
+                }
+                accepted = listener.accept(), if connections.len() < max_connections => match accepted {
                     Ok((tcp, _peer)) => {
-                        let budget = ReceiveBudget::new(Instant::now(), self.timeout, self.receive_timeout)
-                            .map_err(|error| MisfinServerError::Config(error.to_string()))?;
-                        let acceptor = self.acceptor.clone();
-                        let dispatcher = self.dispatcher.clone();
-                        tokio::spawn(async move {
+                        let budget = match ReceiveBudget::new(Instant::now(), timeout, receive_timeout) {
+                            Ok(budget) => budget,
+                            Err(error) => break (Err(MisfinServerError::Config(error.to_string())), Instant::now()),
+                        };
+                        let acceptor = acceptor.clone();
+                        let dispatcher = dispatcher.clone();
+                        connections.spawn(async move {
                             if let Err(error) = handle_connection(acceptor, dispatcher, tcp, budget).await {
                                 log::debug!("misfin: receiving connection failed: {error}");
                             }
@@ -424,8 +489,43 @@ impl BoundMisfinServer {
                     Err(error) => log::warn!("misfin: accept failed: {error}"),
                 },
             }
+        };
+        let grace_deadline = stopped_at.checked_add(shutdown_grace).unwrap_or(stopped_at);
+        drop(listener);
+        finish_connections(&mut connections, grace_deadline).await;
+        outcome
+    }
+}
+
+fn report_connection_join(result: Result<(), JoinError>) {
+    if let Err(error) = result {
+        if error.is_panic() {
+            log::warn!("misfin: receiving task panicked: {error}");
+        } else {
+            log::debug!("misfin: receiving task cancelled: {error}");
         }
-        Ok(())
+    }
+}
+
+async fn finish_connections(connections: &mut JoinSet<()>, deadline: Instant) {
+    // The caller fixes this deadline when shutdown wins the select, so listener
+    // teardown or scheduling before the drain's first poll cannot renew grace.
+    if Instant::now() < deadline {
+        let drained = tokio::time::timeout_at(deadline, async {
+            while let Some(result) = connections.join_next().await {
+                report_connection_join(result);
+            }
+        })
+        .await;
+        if drained.is_ok() {
+            return;
+        }
+    }
+    connections.abort_all();
+    // Aborting requests cancellation. Await every terminal join so returning
+    // serve() cannot leave accepted connection futures alive in the runtime.
+    while let Some(result) = connections.join_next().await {
+        report_connection_join(result);
     }
 }
 
@@ -574,6 +674,10 @@ impl ClientCertVerifier for AcceptAnyClient {
         ]
     }
 }
+
+#[cfg(test)]
+#[path = "server_lifecycle_tests.rs"]
+mod server_lifecycle_tests;
 
 #[cfg(test)]
 #[path = "server_deadline_tests.rs"]

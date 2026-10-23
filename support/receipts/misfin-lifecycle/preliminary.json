@@ -1,0 +1,56 @@
+{
+  "schema": "misfin-lifecycle-preliminary-v1",
+  "date": "2026-10-23",
+  "qualified": false,
+  "base_source": "e72dbd4218ce0ebfb872bd37ac2522292eebc57b",
+  "lane_command": "cargo test -p misfin --features server,ring server_lifecycle_tests -- --nocapture",
+  "lane_environment": {
+    "CARGO_TARGET_DIR": "C:\\t\\cargo-targets\\smolweb",
+    "CARGO_BUILD_BUILD_DIR": "C:\\t\\cargo-targets\\smolweb\\build"
+  },
+  "attempts": [
+    {
+      "exit_code_reported_by_lane": 1,
+      "diagnostic": "E0433 server_lifecycle_tests.rs:38 cannot find helpers in server",
+      "remedy": "Correct crate::server::helpers::sha256_hex to crate::helpers::sha256_hex."
+    },
+    {
+      "exit_code_reported_by_lane": 1,
+      "passed": 5,
+      "failed": 2,
+      "cases": [
+        "finish_connections_reaps_panics_and_joins_remaining_tasks: expected2 drop guards, observed0",
+        "finish_connections_zero_grace_aborts_and_joins_immediately: expected1 drop guard, observed0"
+      ],
+      "cause": "The test aborted tasks before their first poll constructed the drop guards.",
+      "remedy": "Use oneshot start acknowledgements before requesting cancellation."
+    },
+    {
+      "exit_code": 0,
+      "passed": 7,
+      "filtered": 71,
+      "failed": 0,
+      "native_tests_sha256": "5bd93a044ddb004dda603876393fa5ada159f1fd2bc51d3ab67cdbc28769e011",
+      "qualification_limits": "Lane omitted --locked --offline. Final root qualification uses both flags explicitly; Cargo.lock remains byte-identical. Native fixtures and fixed-epoch controls were strengthened afterwards. Controlled child panic output was intentional."
+    }
+  ],
+  "root_native_close_expectation_attempt": {
+    "command": "cargo test -p misfin --no-default-features --features server,ring --locked --offline server_lifecycle_tests --quiet",
+    "exit_code": 101,
+    "passed": 8,
+    "failed": 2,
+    "filtered": 71,
+    "cases": [
+      "zero_grace_closes_an_admitted_peer_and_listener_before_returning",
+      "dropping_serve_cancels_owned_peers_without_claiming_synchronous_join"
+    ],
+    "native_server_sha256": "90e7f31a8e8f7c1f2effb15a666f6cf7b6be0d4f5a5caaafc528993f9bad4155",
+    "native_tests_sha256": "e28a714f9ff1e3392ce218020914f055577f5b9ca1a9bacbf5fb0a0969c5df51",
+    "cause": "Immediate Windows TLS/TCP abort returned ConnectionReset rather than the fixtures' sole expected UnexpectedEof.",
+    "remedy": "Require bounded peer closure while accepting UnexpectedEof, ConnectionReset or ConnectionAborted as native close outcomes. Production code unchanged by this fixture correction."
+  },
+  "final_refinement": "Grace deadline is fixed when shutdown wins the listener select and passed as an absolute Instant into the drain, so teardown or delayed first poll cannot renew it. An expired-drain paused-time control was added; final source is qualified separately.",
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "retained": "Compact summaries only; no full logs or copied executables. All runs in this lane used both approved target and build-directory variables. Older receiving cache and cited evidence preserved.",
+  "byte_convention": "UTF-8 LF under -text; source hashes identify native Windows bytes."
+}
