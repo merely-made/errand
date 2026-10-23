@@ -1,8 +1,8 @@
 # Client receive limits
 
-**Status (2026-10-22):** routed clients and native Micron limits implemented;
-browser receiving qualification in progress. Standalone session follow-ups in
-phase 5 remain open.
+**Status (2026-10-22):** phases 1 to 4 landed: routed clients, native Micron
+limits and browser receiving are published and qualified. Standalone session
+follow-ups in phase 5 remain open.
 
 ## Ownership and scope
 
@@ -94,6 +94,20 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-22: consumer delivery is complete. Mere source `faa6f1fb3` and
+  qualification `ce7b4816f` pass 48 fetch, 75 document and three original V1
+  compatibility cases, minimum feature builds and production strict Clippy.
+  Turnstone source `6737085d` and qualification `0283e312` compile on the exact
+  published cohort and pass 78 focused checks, including independent native
+  Read/Submit encoded, packed and body budgets. The two existing external-host
+  and isolated R3 prerequisite tests remain ignored. Canonical receipts:
+  `mere/support/receipts/client-limits/consumer.json` and
+  `turnstone/support/receipts/client-limits/consumer.json`. Their source-only
+  lock substitutions preserve registry versions and unrelated suppliers.
+  The earlier pure-preflight timer regression and Windows held-EOF fixture
+  failure are repaired and retained separately in Mere's receipt directory.
+  Temporary worktrees are integrated and removed, with stable targets reused.
 
 - 2026-10-22: routed/native matrix passes 253 tests with one existing live Nex
   test ignored, and the final focused facade suite passes 14. Actual facade
