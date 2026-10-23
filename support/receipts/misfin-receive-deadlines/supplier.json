@@ -1,0 +1,123 @@
+{
+  "schema": "misfin-receive-deadlines-qualification-v1",
+  "date": "2026-10-23",
+  "owner": "Misfin native receiving transactions",
+  "qualified_source": "2a2dbac22fb00d9fc342f2b06dcce51ac158fbd4",
+  "qualified_tree": "5a0d4a84674c45b7f2b1a4aca9e9d147a89cd45d",
+  "misfin_crate_tree": "746a9cedae53d6c0283a2b5948ec237d337e45f3",
+  "base_source": "c80646b771c4d6e8d7d73fceb4f4a251e02ad9d5",
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "git_lock_blob": "aeee95e98a7f49618dd4be4316ea477a112a2268",
+  "lock_delta": "None. No manifest, dependency, registry version or checksum changes.",
+  "native_source_sha256": {
+    "crates/misfin/src/server.rs": "51d00e5e9dafeaef179f36edc49cfe93d6d65761882c14b227f949dadc1a8ab3",
+    "crates/misfin/src/server_deadline_tests.rs": "7f7b2a78d73e552737768e856c1ed9c10ee94b4b33c7a083efa4647ef56a1b9f",
+    "crates/misfin/README.md": "e93cd90cc53c4815f1eb0babbcb9f1acaf1506368246c581f08242876ce12d39"
+  },
+  "toolchain": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo 1.99.1 (5f94df478 2026-08-27)"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "C:\\t\\cargo-targets\\smolweb",
+    "CARGO_BUILD_BUILD_DIR": "C:\\t\\cargo-targets\\smolweb\\build",
+    "note": "Both variables were explicitly set for every final Cargo gate. The preliminary lane's wrong environment variable and retained cache are recorded separately."
+  },
+  "commands": [
+    {
+      "command": "cargo test -p misfin -p errand --all-features --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 141,
+      "integration_passed": 14,
+      "doctest_passed": 1,
+      "failed": 0,
+      "ignored": 1,
+      "by_owner": {
+        "errand": { "unit": 69, "integration": 14, "doc": 1, "ignored": 1 },
+        "misfin_library": { "unit": 71, "doc": 0, "ignored": 0 },
+        "misfin_cli": { "unit": 1, "ignored": 0 }
+      },
+      "note": "AWS-LC selected when both providers are enabled. Existing live Nex test remains ignored. Existing native client/server mailbox round trip and trust/status tests remain green. Parallel harness passes."
+    },
+    {
+      "command": "cargo test -p misfin --no-default-features --features server,ring --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 71,
+      "doctest_passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "note": "Independent ring-only provider, including all 20 new receiving cases and the existing sending deadline suite."
+    },
+    {
+      "command_template": "cargo check -p misfin --no-default-features --locked --offline --quiet [--features <features>]",
+      "scope": "Six independent invocations; core means no feature flag.",
+      "results": [
+        { "features": "core", "exit_code": 0 },
+        { "features": "client,ring", "exit_code": 0 },
+        { "features": "client,aws-lc", "exit_code": 0 },
+        { "features": "server,ring", "exit_code": 0 },
+        { "features": "server,aws-lc", "exit_code": 0 },
+        { "features": "cli", "exit_code": 0 }
+      ]
+    },
+    {
+      "command": "cargo clippy -p misfin --all-features --all-targets --locked --offline --quiet --no-deps -- -D warnings",
+      "exit_code": 0,
+      "strict": true
+    },
+    {
+      "command": "rustfmt --edition 2024 --config skip_children=true --check crates/misfin/src/server.rs crates/misfin/src/server_deadline_tests.rs",
+      "exit_code": 0
+    },
+    { "command": "git diff --cached --check", "exit_code": 0 }
+  ],
+  "policy": {
+    "step": "MisfinServerConfig::timeout: Duration; constructor default30s. Each complete TLS handshake, request read, response write and close-notify gets one allowance, clamped to the fixed whole deadline.",
+    "whole": "MisfinServerConfig::receive_timeout: Duration; constructor default120s. Epoch starts immediately on successful TCP accept, before spawn. Listener idle time is not charged; pre-poll task queue time is charged. Each accepted connection gets a fresh budget.",
+    "invalid": "Zero and unrepresentable durations fail as Config errors before TLS configuration/bind. Tests assert exact policy diagnostic with invalid TLS material, without a runtime.",
+    "expiry": "Private handler returns io::ErrorKind::TimedOut with named step or whole-receive diagnostic; public listener logs connection failure and continues accepting. No byte or phase renews the whole budget, and bytes never renew the request-read step.",
+    "dispatch": "Check immediately before and after synchronous mailbox dispatch. Do not begin after expiry. A commit already made remains stored after late completion, response failure, close timeout or cancellation. There is no rollback or automatic resend.",
+    "framing": "Only observed CRLF within2048 wire bytes makes a dispatchable request. Exact fit succeeds; EOF before CRLF and overlong framing do not deliver. Embedded and trailing bare LF are valid message content; remove exactly the final CRLF, preserving message bytes rather than trimming all trailing newlines.",
+    "cooperative": "Async timers cannot preempt blocking work inside a poll or synchronous storage. Late ready results and late synchronous completion are refused; stored delivery may precede that refusal."
+  },
+  "coverage": {
+    "new_case_count": 20,
+    "controlled_time_and_carriers": [
+      "Fixed acceptance epoch shared across individually valid stages; distinct step limit and remaining-whole clamp.",
+      "Expired acceptance and late-ready operation cannot run/return success.",
+      "Expired receiving and dispatch callback store no mail.",
+      "Slow byte arrival cannot renew the complete request-read allowance.",
+      "Blocked partial response write and pending shutdown time out while exactly one committed message remains.",
+      "Actual synchronous Dispatcher commit plus controlled blocking crosses expiry; callback result refused and single stored message retained.",
+      "Exact2048 request accepted; truncated EOF and LF-only EOF rejected59 without mail; embedded/trailing LF preserved."
+    ],
+    "actual_localhost_tcp_tls": [
+      "Stalled native TLS handshake reaches its step deadline, handler returns and raw peer observes EOF.",
+      "Already-expired acceptance closes native connection before handshake starts.",
+      "Completed TLS followed by stalled request reaches read deadline, peer observes connection loss and actual handler mailbox remains empty.",
+      "Public configured server:700ms whole beats3s step after800ms idle, for two successive connections, proving policy propagation and fresh accepted budgets.",
+      "Existing complete public sending/receiving round trip verifies20, fingerprint META, exact body and claimed sender; existing oversize and trust-status regressions pass."
+    ],
+    "limits": "Pending close is qualified at the shared private AsyncWrite seam; tokio-rustls shutdown does not wait for peer close-notify. Controlled synchronous blocking is not a claim of physical Redb stall timing. The public listener fixture observes two already-completed peers and the accept-loop result; it does not qualify joining still-running tasks. External mailservers, installed application, product UI, separate machines and radio are unqualified."
+  },
+  "scope": {
+    "changed": "Native Misfin server policy, per-transaction timing, complete request admission and focused tests/docs only. New public config fields extend constructor defaults; workspace search found no downstream config struct literals needing repair.",
+    "unchanged": "Connection admission/task counts, listener joined shutdown, mailbox trust/identity/status rules, sending API, other protocol servers, Errand routes, product pins, site snapshot V1 and all earlier receipts.",
+    "next_lane": "Connection admission and joined shutdown remain explicitly separate."
+  },
+  "preliminary_evidence": "preliminary.json records the earlier19-case pass, test-only Clippy failure/fix, and wrong build-directory variable. It is not final-source qualification.",
+  "resources": {
+    "shared_retained_evidence_cap_bytes": 100000000,
+    "evidence": "Compact JSON summaries only; no full logs or copied executable.",
+    "isolated_cargo_homes_created": [],
+    "worktrees_created": [],
+    "retained_unexpected_cache": {
+      "path": "C:\\Users\\mark_\\Code\\repos\\smolweb\\target\\build",
+      "owner": "Receiving test lane preliminary run",
+      "new_file_count": 1234,
+      "new_bytes": 356351526,
+      "reason": "Automatic approval review rejected scoped cleanup and narrower executable-only deletion as blocked by policy. Neither deletion ran. Preserve preexisting cache/source/evidence; final gates use the approved stable target."
+    }
+  },
+  "byte_convention": "Native hashes identify Windows source bytes; Git source/tree identities identify normalized repository content. JSON is UTF-8 LF under -text. Qualification commit changes docs/receipts only."
+}

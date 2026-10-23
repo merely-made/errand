@@ -1,11 +1,11 @@
 # Client receive limits
 
-**Status (2026-10-23):** phases 1 to 7 landed and qualified: routed clients,
+**Status (2026-10-23):** phases 1 to 8 landed and qualified: routed clients,
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
-size and framing limits, native session operation deadlines, and Misfin mail
-deadlines. Whole-send and per-step policy remain independently configurable.
-Phase 8, Misfin receiving deadlines, is in progress; connection admission and
-joined listener shutdown remain a separate lane.
+size and framing limits, native session operation deadlines, and Misfin sending
+and receiving deadlines. Whole-transaction and per-step policy remain
+independently configurable. Connection admission and joined listener shutdown
+remain a separate lane.
 
 ## Ownership and scope
 
@@ -232,6 +232,26 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: receiving source `2a2dbac2` completes phase 8. The final combined
+  gate passes 141 unit tests, 14 integration tests and one doctest, with the
+  existing live Nex ignore. The ring-only server suite passes 71 tests; six
+  independent feature builds, strict all-target Misfin Clippy and changed-file
+  formatting pass. Twenty new controls cover fixed acceptance epochs, distinct
+  step/whole timing, slow reads, blocked reply/close, completed framing, late
+  storage commits and fresh budgets through the public listener. Existing
+  native TLS round trip and trust/status cases remain green. The
+  [receiving supplier receipt](../../support/receipts/misfin-receive-deadlines/supplier.json)
+  records exact source/tree/native hashes, commands and qualification limits.
+  Sending source, Cargo.lock, product pins and previous receipts are unchanged.
+  New compact evidence retains 11,820 bytes. Final gates use the stable approved
+  target/build directory. A preliminary lane used the wrong build-dir variable;
+  its 1,234 new generated cache files (356,351,526 bytes) remain under
+  `smolweb/target/build` because automatic approval review rejected both scoped
+  cleanup attempts as "blocked by policy". Neither deletion ran; existing
+  source/cache/evidence was preserved. The [preliminary record](../../support/receipts/misfin-receive-deadlines/preliminary.json)
+  also retains the test-only Clippy failure and its correction. Admission and
+  joined shutdown remain separately queued; no new Cargo home or worktree.
 
 - 2026-10-23: started phase 8 in native Misfin. Root owns production, docs and
   qualification; two bounded Luna lanes own focused tests and read-only review.
