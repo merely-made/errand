@@ -1,0 +1,31 @@
+{
+  "schema": "mail-deadlines-fixture-failure-v1",
+  "date": "2026-10-23",
+  "base_commit": "e4e3b8ea84b3592abeb91952b17b8db0f2932445",
+  "qualified": false,
+  "command": "cargo test -p misfin --no-default-features --features client,ring --locked --offline --message-format=json",
+  "outcome": "Owned hung native test executable terminated after verifying its exact stable target path; no final test summaries.",
+  "elapsed_seconds": 106.644,
+  "compiler_errors": 0,
+  "native_cases_exceeding_60_seconds": 7,
+  "diagnosis": "Standard listener clone used for no-second-connection monitoring blocked after Windows Tokio/IOCP registration. The timeout test harness itself blocked outside Tokio.",
+  "native_production_sha256": "311023afd37c3aabee92a50003289869ac4f9484ab2dea03ca8b688922bb7a68",
+  "native_tests_sha256": "a0a4f5954f77f73904958e3991b592be72b3f2525b881b3553770edff0341088",
+  "executable_sha256": "f6bbc2baf67d37ad9294502146a7c821875e8b4693997f8d7d58db94c7394582",
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "remedy": "Use Arc<TokioTcpListener> and bounded asynchronous accept for live fixture monitoring. Do not use blocking standard accept on a registered/duplicated socket.",
+  "recovery": {
+    "command": "cargo test -p misfin --no-default-features --features client,ring --locked --offline --message-format=json client_deadline_tests -- --test-threads=1",
+    "passed": 15,
+    "filtered": 19,
+    "failed": 0,
+    "ignored": 0,
+    "native_test_seconds": 1.32,
+    "native_tests_sha256": "2479b8b9b8d48005b5e8cdee01cee8305b259aa8feb68f9a3af5f7df1356b730",
+    "native_production_sha256": "84eb105084895cc6b0b19d2a4d73a75a7a702759e2b0bc581d8b04b993abac92"
+  },
+  "target": "C:\\t\\cargo-targets\\smolweb",
+  "build_dir": "C:\\t\\cargo-targets\\smolweb\\build",
+  "retained_full_logs": [],
+  "receipt_byte_convention": "UTF-8 LF JSON, -text attribute; Git/native receipt bytes identical. Source and executable hashes identify native bytes; this failed attempt is not shipping qualification."
+}

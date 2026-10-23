@@ -66,6 +66,8 @@ Two schemes write rather than fetch, so they are direct calls, not part of
   with a per-request timeout; returns `Error::Timeout` if it does not complete.
 - `titan_upload(...)` — Titan write.
 - `misfin_send(...)` with `ClientIdentity` and `MISFIN_PORT` — Misfin mail send.
+- `misfin_send_with_options(..., &MisfinSendOptions)` — explicit mail send with
+  caller-selected step and whole-send budgets.
 - `set_trust_store`, `TofuStore`, `InMemoryTofu`, `PermissiveTofu` — TOFU trust
   policy (see below).
 - `Scheme` — the routable scheme enum, with `Scheme::parse(&str)` and
@@ -73,7 +75,8 @@ Two schemes write rather than fetch, so they are direct calls, not part of
 - `Response { url, status, raw_status, meta, body }` with `.mime()`.
 - `Status` — `Success`, `Input`, `Redirect`, `Failure`, `CertRequired`.
 - `Error` — `UnsupportedScheme`, `BadUrl`, `Connect`, `Io`, `Protocol`,
-  `Timeout`, `CertificateChanged { host, pinned, seen }`.
+  `Timeout`, `MisfinSendTimeout { receipt }`,
+  `CertificateChanged { host, pinned, seen }`.
 - `Url` re-exported from the `url` crate.
 
 `Response::raw_status` preserves the protocol's own two-digit code for the
@@ -114,6 +117,18 @@ the response and whole operation. Passing Titan to generic fetch retains its
 existing zero-byte upload behavior; callers remain responsible for requiring
 explicit Submit and guarding redirects into write schemes. Misfin mail and the
 standalone DICT/FSP/Kepler/Text client families have separate native policies.
+
+Misfin's explicit `misfin_send_with_options` accepts `MisfinSendOptions` with
+`timeout` (per connect/TLS/write/read step; `None` uses 30 seconds) and
+`send_timeout` (the whole send through connection cleanup; `None` uses 120
+seconds). `misfin_send` uses those native defaults. Whole-budget expiry returns
+`Error::MisfinSendTimeout { receipt }`: an observed native `MisfinSendReceipt`
+retains its exact status, META and server fingerprint, including an
+acknowledgment received before cleanup expired. With no receipt, delivery can
+still have occurred. Cancelling a send can likewise leave delivery uncertain.
+Errand never retries, follows a mail redirect, or automatically resends; the
+caller must decide what to do with the outcome. Mail remains a direct write
+companion and is not an ordinary fetch route.
 
 ```rust
 let limits = errand::FetchOptions {

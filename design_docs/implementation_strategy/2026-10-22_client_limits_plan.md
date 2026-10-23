@@ -3,7 +3,7 @@
 **Status (2026-10-23):** phases 1 to 6 landed and qualified: routed clients,
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
 size and framing limits, plus native session operation deadlines. Mail deadlines
-remain separately queued in phase 7.
+are in progress in phase 7, with whole-send and per-step policy kept distinct.
 
 ## Ownership and scope
 
@@ -77,15 +77,56 @@ receipts. New receipt hashes must state their Git/native byte convention.
    feature builds and strict Clippy qualify the exact source. Existing size,
    metadata and framing tests remain green. Retain new compact receipts within
    the shared 100 MB cap without replacing previous evidence.
-7. Qualify mail deadlines separately. Misfin's existing per-step deadlines stay
-   distinct from whole-send policy. Done when mail-owned whole-send timeout and
-   cancellation tests qualify that API; session or routed Errand evidence cannot
-   close this phase.
+7. Bound Misfin sends separately. Keep `SendOptions::timeout` as the 30-second
+   per-step default and add independently configurable `send_timeout`, default
+   120 seconds, shared across DNS/TCP/TLS/write/full response/close-notify after
+   local preflight. Whole expiry remains distinct from named step timeouts.
+   Preserve a complete observed receipt if cleanup exhausts the whole budget;
+   preserve primary fingerprint refusal without writing the message. Bound
+   cleanup without retries or redirected sends. Done when native TLS and
+   controlled-carrier tests qualify cumulative budgets, cancellation, known
+   receipt retention, pure preflight and complete response framing; core/client/
+   server/CLI feature graphs and strict native Misfin Clippy pass. Errand uses
+   the recorded existing parser lint allowances for its all-target Clippy gate.
+   Errand's explicit
+   send companion must forward caller-selected mail budgets and retain native
+   timeout receipt facts. Receiving, ordinary fetching, actor lifetime and
+   product sending UI remain outside this slice. Retain compact new receipts
+   within the shared 100 MB cap without replacing previous evidence.
 
 ## Findings
 
 ### 2026-10-23
 
+- Misfin's four existing timers bound connect, TLS, write and full response
+  reads independently; both success and pin-mismatch shutdown paths were
+  unbounded. A fixed send deadline clamps each step, including cleanup, without
+  renewing the shared allowance. A parsed receipt and a primary pin refusal
+  remain available when bounded cleanup exhausts that allowance.
+- The Misfin response reader previously returned EOF/cap-truncated text to a
+  permissive status parser. A saved acknowledgement now requires complete
+  CRLF framing within the native byte ceiling; the general status parser and
+  status/META/fingerprint representations remain unchanged.
+- Real tokio-rustls shutdown flushes local close-notify and shuts down the
+  underlying writer; it does not wait for peer close-notify. Controlled pending
+  shutdown tests qualify cleanup expiry; native TLS fixtures qualify actual
+  connection/handshake/reply and cancellation behavior separately.
+- A Windows fixture's standard listener clone blocked during no-second-send
+  monitoring after Tokio/IOCP registration. Use bounded asynchronous accepts
+  for live fixtures. The [failed preliminary gate](../../support/receipts/mail-deadlines/preliminary-fixture-failure.json)
+  is retained separately from final qualification; its 15-case focused recovery
+  passes after replacing the blocking monitor.
+- The [parallel fixture failure](../../support/receipts/mail-deadlines/parallel-fixture-failure.json)
+  records a later read-timeout assertion with only 50 ms for earlier native
+  setup. Its output omitted the actual error phase, so earlier setup expiry is
+  a suspected cause. Native phase tests now provide setup headroom and error
+  diagnostics; paused-time exact-budget tests retain their original policies.
+- CLI and Errand are the active native send consumers. Both inherit native
+  defaults; Errand's new explicit options helper makes both budgets selectable.
+  Its typed whole-send timeout retains the native receipt instead of discarding
+  acknowledgement facts. The CLI's error formatter also retains known reply
+  and fingerprint fields. Mere's adapter remains receive-only; no product send
+  UI or dependency repin is required by this supplier-native slice.
 - Tokio's timeout polls the operation before its timer. Native completion and
   ready-carrier read checks must also compare the absolute deadline, so a late
   ready result cannot become success. These are cooperative async deadlines;
@@ -156,6 +197,12 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: started the mail deadline slice. Native Misfin owns fixed send
+  budgets and delivery evidence; Errand owns explicit send option forwarding.
+  Existing per-step timers and server receiving policy remain distinct.
+  Native fixtures, independent review and exact-source receipts share a 100 MB
+  retained-byte cap using the existing stable smolweb target/build directory.
 
 - 2026-10-23: session source `c0ef44b1` completes phase 6. The combined gate
   passes 211 unit tests, 10 integration tests and eight doctests, with 47 new

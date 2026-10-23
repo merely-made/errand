@@ -21,12 +21,23 @@
 //! feature, outside errand's client-transport scope.
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use std::time::Duration;
 use url::Url;
 
 use crate::{Error, Response, Status};
 
 /// Misfin's well-known port.
 pub const MISFIN_PORT: u16 = 1958;
+
+/// Time budgets for one explicitly authorized mail send.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SendOptions {
+    /// Per-step connect/TLS/write/read timeout. `None` uses the native 30 seconds.
+    pub timeout: Option<Duration>,
+    /// Whole-send budget, including connection cleanup. `None` uses 120 seconds.
+    /// Expiry can retain an acknowledgment in [`Error::MisfinSendTimeout`].
+    pub send_timeout: Option<Duration>,
+}
 
 /// A client identity for a misfin send: the certificate chain + private key,
 /// in DER, supplied by the caller. The leaf comes first; further chain
@@ -49,6 +60,18 @@ pub async fn send(
     message: &str,
     identity: ClientIdentity,
 ) -> Result<Response, Error> {
+    send_with_options(recipient, message, identity, &SendOptions::default()).await
+}
+
+/// Send with caller-selected step and whole-send budgets. This does not retry,
+/// follow redirects, or resend after a timeout. A timeout or cancellation after
+/// writing may leave delivery uncertain; an observed receipt is retained.
+pub async fn send_with_options(
+    recipient: &Url,
+    message: &str,
+    identity: ClientIdentity,
+    options: &SendOptions,
+) -> Result<Response, Error> {
     if recipient.scheme() != "misfin" {
         return Err(Error::UnsupportedScheme(recipient.scheme().to_string()));
     }
@@ -65,6 +88,8 @@ pub async fn send(
         // The addr-spec omits the port; an explicit URL port is only the
         // dial target.
         port: recipient.port(),
+        timeout: options.timeout,
+        send_timeout: options.send_timeout,
         ..Default::default()
     };
     let receipt = misfin::send(&address, message, &options)
@@ -118,7 +143,7 @@ fn map_error(error: misfin::SendError) -> Error {
         )),
         SendError::MessageContainsCarriageReturn => {
             Error::Protocol("misfin messages must not contain carriage returns".into())
-        },
+        }
         SendError::InvalidHost(host) => Error::BadUrl(format!("invalid misfin host '{host}'")),
         SendError::FingerprintMismatch { expected, found } => Error::Protocol(format!(
             "misfin server fingerprint mismatch: expected {expected}, found {found}"
@@ -126,6 +151,10 @@ fn map_error(error: misfin::SendError) -> Error {
         SendError::Tls(message) => Error::Connect(message),
         SendError::Io(message) => Error::Io(message),
         SendError::Timeout(_) => Error::Timeout,
+        SendError::WholeSendTimeout { receipt } => Error::MisfinSendTimeout { receipt },
+        SendError::InvalidTimeout(scope) => {
+            Error::Protocol(format!("invalid misfin {scope} timeout"))
+        }
         SendError::BadResponse(message) => Error::Protocol(message),
     }
 }
@@ -145,6 +174,111 @@ mod tests {
             meta: meta.to_string(),
             server_fingerprint: "aa".repeat(32),
         }
+    }
+
+    fn valid_identity() -> ClientIdentity {
+        let material = misfin::deterministic_identity(
+            &[7; 32],
+            &misfin::MisfinIdentitySpec {
+                address: misfin::MisfinAddress::parse("sender@example.test").unwrap(),
+                blurb: Some("Errand test sender".into()),
+            },
+        )
+        .unwrap();
+        ClientIdentity {
+            cert_chain: vec![material.certificate_der.into()],
+            private_key: PrivateKeyDer::Pkcs8(material.private_key_pkcs8_der.into()),
+        }
+    }
+
+    #[test]
+    fn whole_send_timeout_preserves_exact_native_acknowledgment() {
+        for status in [MisfinStatus::Delivered, MisfinStatus::SendHereForever] {
+            let expected = SendReceipt {
+                status,
+                meta: "native acknowledgment; preserve exactly".into(),
+                server_fingerprint: "bc".repeat(32),
+            };
+            let mapped = map_error(misfin::SendError::WholeSendTimeout {
+                receipt: Some(expected.clone()),
+            });
+            assert!(mapped.to_string().contains("after acknowledgment"));
+            let Error::MisfinSendTimeout { receipt } = mapped else {
+                panic!("whole-send acknowledgment was discarded");
+            };
+            assert_eq!(receipt, Some(expected));
+        }
+    }
+
+    #[test]
+    fn whole_send_timeout_without_acknowledgment_stays_distinct_from_step_timeout() {
+        let mapped = map_error(misfin::SendError::WholeSendTimeout { receipt: None });
+        assert!(mapped.to_string().contains("outcome unknown"));
+        assert!(matches!(mapped, Error::MisfinSendTimeout { receipt: None }));
+        assert!(matches!(
+            map_error(misfin::SendError::Timeout("response read")),
+            Error::Timeout
+        ));
+        assert!(matches!(
+            map_error(misfin::SendError::InvalidTimeout("whole-send")),
+            Error::Protocol(reason) if reason == "invalid misfin whole-send timeout"
+        ));
+    }
+
+    #[test]
+    fn default_send_options_defer_to_native_budgets() {
+        let options = SendOptions::default();
+        assert_eq!(options.timeout, None);
+        assert_eq!(options.send_timeout, None);
+    }
+
+    #[tokio::test]
+    async fn configured_zero_mail_budgets_refuse_before_contact() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let recipient = url(&format!("misfin://recipient@127.0.0.1:{}", address.port()));
+        for whole_wins in [false, true] {
+            let options = if whole_wins {
+                SendOptions {
+                    timeout: Some(Duration::from_secs(2)),
+                    send_timeout: Some(Duration::ZERO),
+                }
+            } else {
+                SendOptions {
+                    timeout: Some(Duration::ZERO),
+                    send_timeout: Some(Duration::from_secs(2)),
+                }
+            };
+            let result = send_with_options(
+                &recipient,
+                "explicitly authorized message",
+                valid_identity(),
+                &options,
+            )
+            .await;
+            if whole_wins {
+                assert!(matches!(
+                    result,
+                    Err(Error::MisfinSendTimeout { receipt: None })
+                ));
+            } else {
+                assert!(matches!(result, Err(Error::Timeout)));
+            }
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), listener.accept())
+                .await
+                .is_err(),
+            "a zero mail budget contacted the recipient"
+        );
+    }
+
+    #[tokio::test]
+    async fn mail_is_never_an_ordinary_fetch() {
+        assert!(matches!(
+            crate::fetch("misfin://recipient@127.0.0.1:1").await,
+            Err(Error::UnsupportedScheme(scheme)) if scheme == "misfin"
+        ));
     }
 
     #[test]

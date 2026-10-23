@@ -149,7 +149,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 expected_fingerprint: flags.pin.clone(),
                 ..Default::default()
             };
-            let receipt = tokio_block_on(send(&recipient, &message, &options))?;
+            let receipt = tokio_block_on(async {
+                send(&recipient, &message, &options)
+                    .await
+                    .map_err(send_error_message)
+            })?;
             println!("{} {}", receipt.status, receipt.meta);
             println!("server fingerprint: {}", receipt.server_fingerprint);
             if !receipt.status.is_success() {
@@ -249,6 +253,21 @@ fn mailbox_host(mailbox: &ServedMailbox) -> &str {
     &mailbox.address.host
 }
 
+fn send_error_message(error: misfin::SendError) -> String {
+    let mut message = error.to_string();
+    if let misfin::SendError::WholeSendTimeout {
+        receipt: Some(receipt),
+    } = error
+    {
+        // The CLI converts errors to text, so retain the known reply here too.
+        message.push_str(&format!(
+            "\nserver reply: {} {}\nserver fingerprint: {}",
+            receipt.status, receipt.meta, receipt.server_fingerprint
+        ));
+    }
+    message
+}
+
 fn tokio_block_on<T>(
     future: impl std::future::Future<Output = Result<T, impl ToString>>,
 ) -> Result<T, String> {
@@ -258,4 +277,25 @@ fn tokio_block_on<T>(
         .map_err(|error| error.to_string())?
         .block_on(future)
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_known_server_reply_survives_cli_error_formatting() {
+        let fingerprint = "ab".repeat(32);
+        let message = super::send_error_message(misfin::SendError::WholeSendTimeout {
+            receipt: Some(misfin::SendReceipt {
+                status: misfin::MisfinStatus::Delivered,
+                meta: "known mailbox fingerprint".into(),
+                server_fingerprint: fingerprint.clone(),
+            }),
+        });
+        assert!(message.contains("server reply: 20 (message delivered) known mailbox fingerprint"));
+        assert!(message.contains(&format!("server fingerprint: {fingerprint}")));
+        assert_eq!(
+            super::send_error_message(misfin::SendError::Timeout("response read")),
+            "misfin response read timed out"
+        );
+    }
 }

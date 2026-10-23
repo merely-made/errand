@@ -88,6 +88,39 @@ misfin inbox mark@example.com
 Redirects (30/31) and retryable failures (4x) are reported to the caller, not
 acted on — per the best-practices document, resending is the user's decision.
 
+## Send deadlines
+
+`SendOptions::timeout` remains the per-step allowance, defaulting to 30 seconds
+for connection/name resolution, TLS handshake, request write and the entire
+response-line read. `SendOptions::send_timeout` is a separate whole-send
+allowance, defaulting to 120 seconds. `None` selects these finite defaults.
+One absolute send deadline spans every network stage and best-effort
+close-notify after local request, host, duration and TLS-material preflight.
+Progress and new steps never renew that deadline. Close-notify is also bounded
+by the step allowance; a step-only cleanup failure retains the known receipt,
+as with the earlier best-effort shutdown behavior.
+
+The earlier step error stays `SendError::Timeout(step)`. Whole-budget expiry is
+`WholeSendTimeout { receipt }`: `Some` retains the exact complete server status,
+META and server fingerprint already received before cleanup expired. `None`
+does not establish that the mail was undelivered: after a request write the
+remote server may have accepted it without a reply reaching the sender.
+Fingerprint mismatch remains the primary trust refusal if its bounded cleanup
+expires, and the message is never written on that path.
+The CLI retains the known server reply and fingerprint in its error output.
+
+A valid response requires CRLF within the 2048-byte wire limit. EOF, bare LF
+and a capped partial reply cannot become an acknowledgement. Outgoing request
+length is checked before constructing the wire string. A zero whole-send
+budget refuses before I/O, a zero step budget returns `Timeout("connect")`,
+and unrepresentable durations return `InvalidTimeout(scope)` before a timer.
+
+Cancellation drops the owned connection and starts no detached retry. It can
+lose an acknowledgement already received by the cancelled future, so the
+caller owns delivery reconciliation and any explicit resend. Deadlines are
+cooperative: a custom blocking poll cannot be preempted, while late ready
+completions are refused. Mailbox receiving deadlines remain server-owned.
+
 ## License
 
 MIT, matching how the protocol's own repository licenses its reference

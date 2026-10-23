@@ -50,9 +50,13 @@ pub mod parse;
 #[cfg(feature = "serve")]
 pub mod serve;
 
+pub use ::misfin::SendReceipt as MisfinSendReceipt;
 pub use gemini::exchange as gemini_exchange;
 pub use gemini_protocol::ClientIdentity as GeminiClientIdentity;
-pub use misfin::{ClientIdentity, MISFIN_PORT, send as misfin_send};
+pub use misfin::{
+    ClientIdentity, MISFIN_PORT, SendOptions as MisfinSendOptions, send as misfin_send,
+    send_with_options as misfin_send_with_options,
+};
 pub use scroll::{fetch_with as scroll_fetch, fetch_with_options as scroll_fetch_with_options};
 pub use spartan::{submit as spartan_submit, submit_with_options as spartan_submit_with_options};
 pub use titan::{
@@ -209,6 +213,10 @@ pub enum Error {
     Protocol(String),
     /// The request did not complete within the caller-supplied timeout.
     Timeout,
+    /// A whole Misfin send exceeded its budget. A parsed acknowledgment, if
+    /// observed before expiry during cleanup, is retained without normalization.
+    /// Without one, delivery may still have occurred; never automatically resend.
+    MisfinSendTimeout { receipt: Option<MisfinSendReceipt> },
     /// A Gemini capsule target's certificate no longer matches its pinned fingerprint —
     /// a man-in-the-middle, a server key rotation, or a moved host. The
     /// request was *not* sent. Never silently re-pinned: the embedder decides
@@ -232,6 +240,12 @@ impl std::fmt::Display for Error {
             Error::Io(s) => write!(f, "io: {s}"),
             Error::Protocol(s) => write!(f, "protocol: {s}"),
             Error::Timeout => write!(f, "fetch timed out"),
+            Error::MisfinSendTimeout { receipt: Some(_) } => {
+                write!(f, "misfin send timed out after acknowledgment")
+            }
+            Error::MisfinSendTimeout { receipt: None } => {
+                write!(f, "misfin send timed out; delivery outcome unknown")
+            }
             Error::CertificateChanged { host, pinned, seen } => write!(
                 f,
                 "certificate for {host} changed (possible MITM); pinned {pinned}, saw {seen}"

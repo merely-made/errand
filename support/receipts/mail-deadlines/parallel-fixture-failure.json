@@ -1,0 +1,28 @@
+{
+  "schema": "mail-deadlines-parallel-fixture-failure-v1",
+  "date": "2026-10-23",
+  "qualified": false,
+  "base_commit": "e4e3b8ea84b3592abeb91952b17b8db0f2932445",
+  "tested_staged_tree": "054f3ba662f43c65ba9c54de7d611ed11bfd1232",
+  "command": "cargo test --locked --offline -p misfin -p errand --all-features --quiet",
+  "exit_code": 1,
+  "results": {
+    "errand_unit_passed": 69,
+    "errand_ignored": 1,
+    "errand_integration_passed": 14,
+    "misfin_unit_passed": 50,
+    "misfin_unit_failed": 1
+  },
+  "failed_case": "client::client_deadline_tests::stalled_native_response_retains_the_existing_per_step_timeout",
+  "assertion": "Expected Timeout(\"response read\"); assertion omitted actual error, so the earlier failure phase is unknown.",
+  "native_tests_sha256": "2479b8b9b8d48005b5e8cdee01cee8305b259aa8feb68f9a3af5f7df1356b730",
+  "native_production_sha256": "84eb105084895cc6b0b19d2a4d73a75a7a702759e2b0bc581d8b04b993abac92",
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "suspected_cause": "50ms step budget could expire during earlier TLS setup under parallel scheduling, rather than in the intended response-read phase. This was not proven by the original assertion output.",
+  "remedy": "Give native phase-selection fixtures 500ms setup headroom with a distinct 2s counterpart, include actual-result diagnostics, and qualify again in parallel. Preserve paused-time exact deadlines and ready-carrier overrun controls.",
+  "production_changed_for_remedy": false,
+  "target": "C:\\t\\cargo-targets\\smolweb",
+  "build_dir": "C:\\t\\cargo-targets\\smolweb\\build",
+  "retained_full_logs": [],
+  "receipt_byte_convention": "UTF-8 LF JSON, -text attribute; Git/native receipt bytes identical. Source hashes identify native bytes; this failed attempt is not final qualification."
+}

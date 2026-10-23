@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::time::Instant;
 
 use rustls::DigitallySignedStruct;
 use rustls::SignatureScheme;
@@ -44,7 +45,7 @@ compile_error!(
 
 /// Options for a [`send`]: the sender's identity (strongly recommended — most
 /// servers reply 60 without one), an alternate port, a pinned server
-/// fingerprint, and the per-step IO timeout.
+/// fingerprint, and independent per-step and whole-send time budgets.
 #[derive(Debug, Clone, Default)]
 pub struct SendOptions {
     /// The client certificate presented in the handshake. `None` sends
@@ -61,7 +62,11 @@ pub struct SendOptions {
     /// formatting). On mismatch the send aborts before the message is sent.
     pub expected_fingerprint: Option<String>,
     /// Per-step timeout (connect, handshake, write, read). `None` = 30s.
+    /// Also bounds best-effort close-notify; it never renews the send budget.
     pub timeout: Option<Duration>,
+    /// Whole-send timeout, after local preflight, including DNS/connect, TLS,
+    /// request, response and close-notify. `None` = 120s; zero refuses before I/O.
+    pub send_timeout: Option<Duration>,
     /// Connect to this socket address instead of resolving the recipient's
     /// host. The recipient host is still used for TLS SNI. For deployments
     /// where the mailserver isn't where DNS says (and for tests).
@@ -77,9 +82,16 @@ pub struct SendReceipt {
     pub server_fingerprint: String,
 }
 
-/// Why a [`send`] failed before a response was obtained.
+/// Why a [`send`] failed to complete. A whole-send timeout can retain a
+/// complete response already obtained before cleanup was interrupted.
 #[derive(Debug)]
 pub enum SendError {
+    /// The whole-send budget expired. A complete reply already obtained is
+    /// retained, including its status, META and server fingerprint. With no
+    /// receipt, delivery may be unknown after request transmission.
+    WholeSendTimeout { receipt: Option<SendReceipt> },
+    /// A configured duration cannot be represented by the monotonic clock.
+    InvalidTimeout(&'static str),
     /// The request line would exceed the spec's 2048-byte ceiling. Per the
     /// best-practices document, prompt the user to split the message.
     MessageTooLong { request_bytes: usize, max: usize },
@@ -103,6 +115,18 @@ pub enum SendError {
 impl std::fmt::Display for SendError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::WholeSendTimeout {
+                receipt: Some(receipt),
+            } => write!(
+                formatter,
+                "misfin send timed out after server replied {}; acknowledgement retained",
+                receipt.status
+            ),
+            Self::WholeSendTimeout { receipt: None } => write!(
+                formatter,
+                "misfin send timed out; delivery may be unknown; do not automatically resend"
+            ),
+            Self::InvalidTimeout(scope) => write!(formatter, "invalid misfin {scope} timeout"),
             Self::MessageTooLong { request_bytes, max } => write!(
                 formatter,
                 "misfin request would be {request_bytes} bytes (max {max}); split the message"
@@ -136,14 +160,93 @@ pub fn build_request(recipient: &MisfinAddress, message: &str) -> Result<String,
     if message.contains('\r') {
         return Err(SendError::MessageContainsCarriageReturn);
     }
-    let request = format!("misfin://{} {message}\r\n", recipient.as_addr_spec());
-    if request.len() > MAX_REQUEST_BYTES {
+    // Admit borrowed lengths before constructing the complete request.
+    let request_bytes = [
+        9,
+        recipient.mailbox.len(),
+        1,
+        recipient.host.len(),
+        1,
+        message.len(),
+        2,
+    ]
+    .into_iter()
+    .fold(0usize, usize::saturating_add);
+    if request_bytes > MAX_REQUEST_BYTES {
         return Err(SendError::MessageTooLong {
-            request_bytes: request.len(),
+            request_bytes,
             max: MAX_REQUEST_BYTES,
         });
     }
-    Ok(request)
+    Ok(format!(
+        "misfin://{} {message}\r\n",
+        recipient.as_addr_spec()
+    ))
+}
+
+/// Default allowance for each network step.
+pub const DEFAULT_STEP_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default allowance shared by every network stage of a send.
+pub const DEFAULT_SEND_TIMEOUT: Duration = Duration::from_secs(120);
+
+fn validate_timeouts(step: Duration, whole: Duration) -> Result<(), SendError> {
+    for (scope, duration) in [("per-step", step), ("whole-send", whole)] {
+        if std::time::Instant::now().checked_add(duration).is_none() {
+            return Err(SendError::InvalidTimeout(scope));
+        }
+    }
+    if whole.is_zero() {
+        return Err(SendError::WholeSendTimeout { receipt: None });
+    }
+    if step.is_zero() {
+        return Err(SendError::Timeout("connect"));
+    }
+    Ok(())
+}
+
+/// One fixed send deadline, with independent fresh deadlines for its steps.
+struct SendBudget {
+    deadline: Instant,
+    step_timeout: Duration,
+}
+
+impl SendBudget {
+    fn new(step: Duration, whole: Duration) -> Result<Self, SendError> {
+        validate_timeouts(step, whole)?;
+        Ok(Self {
+            deadline: Instant::now()
+                .checked_add(whole)
+                .ok_or(SendError::InvalidTimeout("whole-send"))?,
+            step_timeout: step,
+        })
+    }
+
+    fn check(&self) -> Result<(), SendError> {
+        if Instant::now() >= self.deadline {
+            Err(SendError::WholeSendTimeout { receipt: None })
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn step<T>(
+        &self,
+        name: &'static str,
+        operation: impl std::future::Future<Output = Result<T, SendError>>,
+    ) -> Result<T, SendError> {
+        self.check()?;
+        let deadline = Instant::now()
+            .checked_add(self.step_timeout)
+            .unwrap_or(self.deadline)
+            .min(self.deadline);
+        let result = tokio::time::timeout_at(deadline, operation).await;
+        // A ready future can run past a timer while it is being polled.
+        self.check()?;
+        if Instant::now() >= deadline {
+            return Err(SendError::Timeout(name));
+        }
+        result.map_err(|_| SendError::Timeout(name))?
+    }
 }
 
 /// Deliver `message` (gemtext; bare newlines allowed) to `recipient` in one
@@ -152,13 +255,22 @@ pub fn build_request(recipient: &MisfinAddress, message: &str) -> Result<String,
 /// This does not retry, follow redirects (30/31), or resend on temporary
 /// failure — per best practices those decisions belong to the user, so they
 /// surface in the [`SendReceipt`] for the caller to act on.
+///
+/// The whole-send budget never resets between steps. Cancellation drops the
+/// owned connection and performs no detached retry. After transmission, a
+/// timeout or cancellation may leave delivery unknown; cancellation cannot
+/// return an acknowledgement already received by the dropped future.
 pub async fn send(
     recipient: &MisfinAddress,
     message: &str,
     options: &SendOptions,
 ) -> Result<SendReceipt, SendError> {
     let request = build_request(recipient, message)?;
-    let timeout = options.timeout.unwrap_or(Duration::from_secs(30));
+    let server_name = ServerName::try_from(recipient.host.clone())
+        .map_err(|_| SendError::InvalidHost(recipient.host.clone()))?;
+    let timeout = options.timeout.unwrap_or(DEFAULT_STEP_TIMEOUT);
+    let send_timeout = options.send_timeout.unwrap_or(DEFAULT_SEND_TIMEOUT);
+    validate_timeouts(timeout, send_timeout)?;
 
     let builder = rustls::ClientConfig::builder_with_provider(tls_provider())
         .with_safe_default_protocol_versions()
@@ -187,6 +299,9 @@ pub async fn send(
         None => builder.with_no_client_auth(),
     };
     let connector = TlsConnector::from(Arc::new(config));
+    // Request, host, duration and TLS-material validation are local preflight.
+    // Every await below shares this one absolute network-transaction budget.
+    let budget = SendBudget::new(timeout, send_timeout)?;
 
     let port = options.port.unwrap_or(MISFIN_PORT);
     let connect = async {
@@ -195,17 +310,21 @@ pub async fn send(
             None => TcpStream::connect((recipient.host.as_str(), port)).await,
         }
     };
-    let tcp = tokio::time::timeout(timeout, connect)
-        .await
-        .map_err(|_| SendError::Timeout("connect"))?
-        .map_err(|error| SendError::Io(error.to_string()))?;
-
-    let server_name = ServerName::try_from(recipient.host.clone())
-        .map_err(|_| SendError::InvalidHost(recipient.host.clone()))?;
-    let mut tls = tokio::time::timeout(timeout, connector.connect(server_name, tcp))
-        .await
-        .map_err(|_| SendError::Timeout("TLS handshake"))?
-        .map_err(|error| SendError::Tls(error.to_string()))?;
+    let tcp = budget
+        .step("connect", async {
+            connect
+                .await
+                .map_err(|error| SendError::Io(error.to_string()))
+        })
+        .await?;
+    let mut tls = budget
+        .step("TLS handshake", async {
+            connector
+                .connect(server_name, tcp)
+                .await
+                .map_err(|error| SendError::Tls(error.to_string()))
+        })
+        .await?;
 
     let server_fingerprint = tls
         .get_ref()
@@ -218,60 +337,117 @@ pub async fn send(
     if let Some(expected) = &options.expected_fingerprint
         && normalize_fingerprint(expected) != server_fingerprint
     {
-        let _ = tls.shutdown().await;
-        return Err(SendError::FingerprintMismatch {
-            expected: normalize_fingerprint(expected),
-            found: server_fingerprint,
-        });
+        // Preserve the definite trust refusal even if best-effort cleanup
+        // exhausts its step or whole budget. No message has been written.
+        return Err(close_after_refusal(
+            &mut tls,
+            &budget,
+            SendError::FingerprintMismatch {
+                expected: normalize_fingerprint(expected),
+                found: server_fingerprint,
+            },
+        )
+        .await);
     }
 
-    tokio::time::timeout(timeout, tls.write_all(request.as_bytes()))
-        .await
-        .map_err(|_| SendError::Timeout("request write"))?
-        .map_err(|error| SendError::Io(error.to_string()))?;
+    budget
+        .step("request write", async {
+            tls.write_all(request.as_bytes())
+                .await
+                .map_err(|error| SendError::Io(error.to_string()))
+        })
+        .await?;
+    finish_response(&mut tls, &budget, server_fingerprint).await
+}
 
-    let line = read_response_line(&mut tls, timeout).await?;
+async fn close_after_refusal<S>(
+    stream: &mut S,
+    budget: &SendBudget,
+    refusal: SendError,
+) -> SendError
+where
+    S: tokio::io::AsyncWrite + Unpin,
+{
+    let _ = budget
+        .step("TLS close", async {
+            stream
+                .shutdown()
+                .await
+                .map_err(|error| SendError::Io(error.to_string()))
+        })
+        .await;
+    refusal
+}
+
+// Shared by the native TLS send and controlled carrier tests. A peer merely
+// withholding its own close-notify does not stall tokio-rustls shutdown.
+async fn finish_response<S>(
+    stream: &mut S,
+    budget: &SendBudget,
+    server_fingerprint: String,
+) -> Result<SendReceipt, SendError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let line = budget
+        .step("response read", read_response_line(stream))
+        .await?;
     let (status, meta) = parse_response_line(&line).map_err(SendError::BadResponse)?;
-
-    // Spec §3: send close-notify so the peer can distinguish a complete
-    // transaction from a truncated one.
-    let _ = tls.shutdown().await;
-
-    Ok(SendReceipt {
+    let receipt = SendReceipt {
         status,
         meta,
         server_fingerprint,
-    })
+    };
+    // Keep close-notify best effort, as before, but bounded by both policies.
+    // If the whole budget wins, retain the exact known response in the error.
+    let _ = budget
+        .step("TLS close", async {
+            stream
+                .shutdown()
+                .await
+                .map_err(|error| SendError::Io(error.to_string()))
+        })
+        .await;
+    if budget.check().is_err() {
+        Err(SendError::WholeSendTimeout {
+            receipt: Some(receipt),
+        })
+    } else {
+        Ok(receipt)
+    }
 }
 
 /// Read the response line: bytes up to the first CRLF, capped at the spec
-/// ceiling, with a timeout across the whole read.
-async fn read_response_line<S>(stream: &mut S, timeout: Duration) -> Result<String, SendError>
+/// ceiling. The caller applies one step deadline across this entire read.
+async fn read_response_line<S>(stream: &mut S) -> Result<String, SendError>
 where
     S: tokio::io::AsyncRead + Unpin,
 {
-    let read_all = async {
-        let mut buf = Vec::with_capacity(256);
-        let mut byte = [0u8; 1];
-        loop {
-            let count = stream
-                .read(&mut byte)
-                .await
-                .map_err(|error| SendError::Io(error.to_string()))?;
-            if count == 0 {
-                break;
-            }
-            buf.push(byte[0]);
-            if buf.ends_with(b"\r\n") || buf.len() >= MAX_REQUEST_BYTES {
-                break;
-            }
+    let mut buf = Vec::with_capacity(256);
+    let mut byte = [0u8; 1];
+    loop {
+        let count = stream
+            .read(&mut byte)
+            .await
+            .map_err(|error| SendError::Io(error.to_string()))?;
+        if count == 0 {
+            return Err(SendError::BadResponse("response ended without CRLF".into()));
         }
-        Ok::<_, SendError>(String::from_utf8_lossy(&buf).into_owned())
-    };
-    tokio::time::timeout(timeout, read_all)
-        .await
-        .map_err(|_| SendError::Timeout("response read"))?
+        buf.push(byte[0]);
+        if buf.ends_with(b"\r\n") {
+            return Ok(String::from_utf8_lossy(&buf).into_owned());
+        }
+        if byte[0] == b'\n' || buf.len() >= MAX_REQUEST_BYTES {
+            return Err(SendError::BadResponse(
+                "response has no CRLF within its byte limit".into(),
+            ));
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "client_deadline_tests.rs"]
+mod client_deadline_tests;
 
 /// Misfin peers are self-signed, so certificate-chain validation is
 /// meaningless; trust is by fingerprint (TOFU / pinning), decided above the

@@ -1,0 +1,27 @@
+{
+  "schema": "mail-deadlines-cli-expectation-failure-v1",
+  "date": "2026-10-23",
+  "qualified": false,
+  "base_commit": "e4e3b8ea84b3592abeb91952b17b8db0f2932445",
+  "command": "cargo test --locked --offline -p misfin -p errand --all-features --quiet",
+  "exit_code_reported_by_lane": 101,
+  "results": {
+    "errand_unit_passed": 69,
+    "errand_ignored": 1,
+    "errand_integration_passed": 14,
+    "misfin_library_passed": 51,
+    "misfin_cli_failed": 1
+  },
+  "failed_case": "tests::a_known_server_reply_survives_cli_error_formatting",
+  "cause": "New CLI test expected bare status 20. Existing MisfinStatus Display renders 20 (message delivered); the formatter correctly preserved that native display.",
+  "remedy": "Correct the new test expectation to the existing native status display. No formatter or status behavior change is needed.",
+  "cli_native_source_sha256": "3237c952836487d1f9fcc568230e01b455632b93c8bb57ed758e1733cb92efd6",
+  "cli_test_executable_sha256": "4c044a22e7aede4dc5daef7386e6221bbbb159209123c1d38509879c256a176a",
+  "native_tests_sha256": "3b6e171db4fa6e19b24b1bd1f5c6e3e6c7351681f1f1fc36e1f3f837f0bcf8fa",
+  "native_production_sha256": "84eb105084895cc6b0b19d2a4d73a75a7a702759e2b0bc581d8b04b993abac92",
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "target": "C:\\t\\cargo-targets\\smolweb",
+  "build_dir": "C:\\t\\cargo-targets\\smolweb\\build",
+  "retained_full_logs": [],
+  "receipt_byte_convention": "UTF-8 LF JSON, -text attribute; source hashes identify native bytes. This failed attempt is not final qualification."
+}
