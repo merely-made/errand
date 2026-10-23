@@ -1,9 +1,8 @@
 # Client receive limits
 
-**Status (2026-10-22):** phases 1 to 4 landed: routed clients, native Micron
-limits and browser receiving are published and qualified. Phase 5, standalone
-DICT/FSP/Kepler/Text size and framing limits, is in progress. Session and mail
-deadlines remain a separate phase 6.
+**Status (2026-10-22):** phases 1 to 5 landed and qualified: routed clients,
+native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
+size and framing limits. Session and mail deadlines remain open in phase 6.
 
 ## Ownership and scope
 
@@ -120,6 +119,21 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-22: standalone source `f04b4fa3` completes phase 5. The combined
+  exact-source gate passes 106 unit tests and seven doctests, ten independent
+  single-crate feature checks, and strict all-feature/all-target Clippy.
+  Actual localhost TCP covers DICT/Kepler/Text, UDP covers FSP, and TLS covers
+  Kepler/Text; supplied carriers cover fragmented framing and early refusal.
+  The [standalone supplier receipt](../../support/receipts/standalone-client-limits/supplier.json)
+  records the tested tree, native source/lock hashes, commands and limits of
+  qualification. The only lock delta adds existing `rcgen` dev-dependency
+  edges to Kepler/Text; registry versions and checksums remain fixed. Review
+  corrected Kepler's empty raw-request/zero-budget edge and retained the old
+  complete-header boundaries as 1025/4097 full-wire bytes. Existing permissive
+  DICT 2xx terminal-status handling remains unchanged. No product repins or
+  new isolated build roots were needed. The new receipt and its byte-preserving
+  attribute retain 9,442 bytes; phase 6 remains separately queued.
 
 - 2026-10-22: started the standalone size/framing slice in three native owner
   lanes: DICT, FSP, and Kepler/Text. Existing command/URI ceilings remain

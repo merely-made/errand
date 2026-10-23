@@ -1,0 +1,208 @@
+{
+  "schema": "standalone-client-limits-qualification-v1",
+  "owner": "errand native protocol crates",
+  "date": "2026-10-22",
+  "qualified_source": "f04b4fa3f5c07df0f977ba4d6b6d9cf78659ab3b",
+  "qualified_tree": "48275a4a2cad2f9d3d99856a08247ec3226f6589",
+  "crate_trees": {
+    "dict-protocol": "688ccb9e5894faedd6a4f491aa0723143b4205f7",
+    "fsp-protocol": "31698f7a3cde9c16c4bae3e5b9e2b0e69da266d1",
+    "kepler-protocol": "2d1c74a2d9908e7826856f0e886b3cb1f3c813dc",
+    "text-protocol": "091d79a802536f9dfcf03b58b88055b8884ebacc"
+  },
+  "native_lock_sha256": "24f02b6f0dc094c4e327aff4681301e7ae3ece9abc2a4d7b8a5a991213850422",
+  "git_lock_blob": "7ab6dda5eb37de2b12ecffa6f0892a119990a607",
+  "native_source_sha256": {
+    "crates/dict-protocol/src/client.rs": "1d74213d05fe4da5e848329baa201a0e79874bcff20563eddedd5ba861df404e",
+    "crates/dict-protocol/src/client_limits_tests.rs": "d608d749ba90959407117eea0ca67270a177fe89b3747677e3debcbc89615430",
+    "crates/dict-protocol/src/lib.rs": "6bdfbf0874b3d0928c1b6913fa0270382afe0309c8e54ca89dc6afc27b8216ad",
+    "crates/fsp-protocol/src/client.rs": "a1726ec3dcc7f657ae9532730cb3117d376b926d5436c9eb3f212d07b9f39a89",
+    "crates/fsp-protocol/src/lib.rs": "ba58611184f11cecc0889f40f7483074e0714158bf179fbc81f83b2c4ec39b6a",
+    "crates/fsp-protocol/src/wire.rs": "f8fccffc043a8cceb00926274e3c898c5f4472233e875710441b1dcbc71fff89",
+    "crates/kepler-protocol/Cargo.toml": "b85cf4352bc5a3a64efaf6e9443139180afffe110fee732f0b72bad74519bba4",
+    "crates/kepler-protocol/src/client.rs": "835709af807bf0ce860d24dca8ee6999c78fab71f115b4663db0f518207374f6",
+    "crates/kepler-protocol/src/lib.rs": "bc0d9d7e0d5bbc19ea5f582e8c26c1e40c87c39fcfd26bf7e2e4624f74f585f4",
+    "crates/kepler-protocol/src/limits_tests.rs": "ce557e70d7258988cece2fe0351ee434c43d1d58c4a0e2e6d5363bd7ef1a4b8f",
+    "crates/kepler-protocol/src/tls.rs": "389d31cc52bfc9de7e69c4f58fae0391f7a908b8a980ca6dee4e22109c74cbdc",
+    "crates/kepler-protocol/src/wire.rs": "f5c2712279b5c21bf979bd7a03c23949062dbf987fe6b52fd01533e8b492a23c",
+    "crates/text-protocol/Cargo.toml": "07925f469ec1f9991a479ac672b7d1d51b0503f422917f94c67b9a23b0b34cc8",
+    "crates/text-protocol/src/lib.rs": "aa99db0ce1f3cfa4f02fe30a58756cd117c5433d0bdd2d136fccda0d48257f75",
+    "crates/text-protocol/src/limits_tests.rs": "c53305de629a17234f9fede3266259a97feb85d753f73a597d8ed1e309aa5233"
+  },
+  "lock_delta": "Only rcgen dev-dependency edges in kepler-protocol and text-protocol; registry package versions and checksums unchanged.",
+  "target": "C:\\t\\cargo-targets\\smolweb",
+  "build_dir": "C:\\t\\cargo-targets\\smolweb\\build",
+  "commands": [
+    {
+      "command": "cargo test --locked --offline -p dict-protocol -p fsp-protocol -p kepler-protocol -p text-protocol --all-features --quiet",
+      "exit_code": 0,
+      "unit_passed": 106,
+      "doctest_passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "by_crate": {
+        "dict-protocol": {
+          "unit": 32,
+          "doc": 1
+        },
+        "fsp-protocol": {
+          "unit": 27,
+          "doc": 2
+        },
+        "kepler-protocol": {
+          "unit": 31,
+          "doc": 3
+        },
+        "text-protocol": {
+          "unit": 16,
+          "doc": 1
+        }
+      }
+    },
+    {
+      "command_template": "cargo check --locked --offline -p <crate> --no-default-features [--features client|tls] --quiet",
+      "scope": "Ten independent Cargo invocations, one crate and feature graph per invocation; grammar means no feature flag.",
+      "results": [
+        {
+          "crate": "dict-protocol",
+          "features": "grammar",
+          "exit_code": 0
+        },
+        {
+          "crate": "dict-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "fsp-protocol",
+          "features": "grammar",
+          "exit_code": 0
+        },
+        {
+          "crate": "fsp-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "kepler-protocol",
+          "features": "grammar",
+          "exit_code": 0
+        },
+        {
+          "crate": "kepler-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "text-protocol",
+          "features": "grammar",
+          "exit_code": 0
+        },
+        {
+          "crate": "text-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "kepler-protocol",
+          "features": "tls",
+          "exit_code": 0
+        },
+        {
+          "crate": "text-protocol",
+          "features": "tls",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "command": "cargo clippy --locked --offline -p dict-protocol -p fsp-protocol -p kepler-protocol -p text-protocol --all-features --all-targets --no-deps --message-format short -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --cached --check",
+      "exit_code": 0
+    }
+  ],
+  "additional_owner_gates": [
+    {
+      "crate": "dict-protocol",
+      "command": "cargo test -p dict-protocol --no-default-features --locked --offline --quiet",
+      "unit_passed": 11,
+      "doctest_passed": 0,
+      "exit_code": 0
+    },
+    {
+      "crates": [
+        "kepler-protocol",
+        "text-protocol"
+      ],
+      "command": "cargo test -p kepler-protocol -p text-protocol --locked --offline --message-format=json --no-default-features",
+      "unit_passed": 21,
+      "doctest_passed": 4,
+      "exit_code": 0
+    },
+    {
+      "crates": [
+        "kepler-protocol",
+        "text-protocol"
+      ],
+      "command": "cargo test -p kepler-protocol -p text-protocol --locked --offline --message-format=json --no-default-features --features client",
+      "unit_passed": 45,
+      "doctest_passed": 4,
+      "exit_code": 0
+    }
+  ],
+  "initial_metadata_gate": "The first locked DICT test refused the pending workspace lock edges. One authorized unlocked offline run normalized exactly the two rcgen edges; all final gates used --locked --offline.",
+  "native_transport_evidence": {
+    "tcp": [
+      "DICT connect_with_limits: exact reply, line/response overflow, invalid configuration before contact",
+      "Kepler: exact request/header/body, header/body overflow, larger caller request budget",
+      "Text: exact request/header/body, header/body overflow, larger caller request budget"
+    ],
+    "udp": [
+      "FSP: full final block plus EOF, overflow, directory aggregation and entries, data/extra preservation, valid-checksum truncated-prefix refusal, native block sizes above 1024"
+    ],
+    "tls": [
+      "Kepler keplers:// fetch_with_limits: exact request/header/body and header/body overflow",
+      "Text fetch_tls_with_limits: exact request/header/body and header/body overflow"
+    ],
+    "supplied_carriers": [
+      "DICT fragmented CRLF, all DEFINE blocks and trailer share one budget, empty lines and definitions count, request refusal preserves session, receive failure prevents further writes",
+      "Kepler declared oversize refuses before body arrives, short declared body fails, exact declared frame preserves following bytes, unknown-length sentinel refuses before EOF, empty raw request with zero request budget refuses",
+      "Text exact/zero/overflow body and request budgets, fragmented/missing CRLF, unknown-length sentinel refuses before EOF"
+    ]
+  },
+  "preservation": [
+    "Existing helpers select finite defaults; explicit configured variants retain native ownership.",
+    "DICT MAX_LINE and Kepler URI1024 ceilings remain protocol-owned.",
+    "Kepler/Text default header wire budgets1025/4097 preserve prior complete-header acceptance boundaries.",
+    "FSP attempts3 and one-second RESEND_AFTER retain per-reply timing; sequence/key behavior unchanged.",
+    "Native metadata, statuses, dot unstuffing, MIME, timestamps, language and cache representations retained.",
+    "FSP dependency-free bounded directory parser preserves old parser API and exposes END separately from SKIP.",
+    "No Errand routes, product adapters, consumer repins or snapshot format changes."
+  ],
+  "review_fixes": [
+    "Preserve Text old complete-header ceiling as4097 wirebytes, matching Kepler1025 convention.",
+    "Reject CR/LF injection in constructed requests before connection/write.",
+    "Refuse Kepler empty raw request under zero request budget.",
+    "Kepler request parser applies URI ceiling to URI field rather than cache/language fields.",
+    "Exercise DICT configured TCP constructor in addition to supplied carriers."
+  ],
+  "unqualified": [
+    "DICT/Kepler/Text whole-operation deadlines and cancellation-safe session reuse",
+    "Scorpion whole-session deadline",
+    "Misfin whole-send deadline",
+    "Aggregate browser traffic/memory budget or actor task-count cap",
+    "External servers, headed UI, physical radio and independent readers"
+  ],
+  "hygiene": {
+    "retained_byte_cap": 100000000,
+    "new_isolated_targets": [],
+    "new_cargo_homes": [],
+    "new_worktrees": [],
+    "retained_full_logs": [],
+    "existing_receipts": "Preserved without overwrite."
+  },
+  "receipt_byte_convention": "UTF-8 LF JSON with -text attribute; Git/native receipt bytes identical. Git trees/blob IDs identify normalized source; SHA256 values identify native source/lock bytes. The staged tree tested by the final gates equals the committed qualified_tree."
+}
