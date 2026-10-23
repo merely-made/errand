@@ -1,12 +1,12 @@
 # Client receive limits
 
-**Status (2026-10-23):** phases 1 to 8 landed and qualified: routed clients,
+**Status (2026-10-23):** phases 1 to 9 landed and qualified: routed clients,
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
 size and framing limits, native session operation deadlines, and Misfin sending
-and receiving deadlines. Whole-transaction and per-step policy remain
-independently configurable. Phase 9, native Misfin connection admission and
-joined listener shutdown, is in progress; sibling lifecycle policies stay
-separately scoped.
+and receiving deadlines, plus native Misfin admission and joined shutdown.
+Whole-transaction, step, connection-count and shutdown-grace policies remain
+independently configurable. Sibling server lifecycle policies stay separately
+scoped.
 
 ## Ownership and scope
 
@@ -268,6 +268,27 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: source `7a23e0dc` completes phase 9. The final combined gate passes
+  152 unit tests, 14 integration tests and one doctest, with the existing live
+  Nex ignore. Independent ring-only Misfin passes 82 tests; six feature graphs,
+  strict all-target Misfin Clippy and changed-file formatting pass. Eleven new
+  controls qualify real native saturation/capacity reuse, admitted mail during
+  drain, aborted TLS/request peers, zero grace, dropped serve and controlled
+  graceful/aborted/panicked task cleanup. The grace deadline is fixed when
+  shutdown is observed, including delayed first drain poll. Signal and await
+  for joined cleanup; Drop requests cancellation and has separate peer-close
+  evidence. The [lifecycle supplier receipt](../../support/receipts/misfin-lifecycle/supplier.json)
+  records exact source/tree/native hashes, commands and sibling ownership.
+  The [preliminary record](../../support/receipts/misfin-lifecycle/preliminary.json)
+  retains helper-path, unstarted drop-guard and Windows reset-expectation
+  corrections; the lane's unlocked pass is not final qualification. Source,
+  trust/framing and deadline test files outside this slice, Cargo.lock and
+  previous receipts are preserved. New evidence retains 13,379 bytes; no new
+  isolated targets, Cargo homes or worktrees. The earlier policy-blocked
+  receiving cache remains untouched. Gemini/Gopher/Finger/Nex/Spartan native
+  listener policies, Guppy inline responsiveness and host-owned exchanges keep
+  their separate follow-up gates.
 
 - 2026-10-23: started phase 9 on smolweb main. Root owns native Misfin production,
   docs and qualification; bounded Luna lanes survey sibling ownership and write

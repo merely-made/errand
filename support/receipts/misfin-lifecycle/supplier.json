@@ -1,0 +1,122 @@
+{
+  "schema": "misfin-lifecycle-qualification-v1",
+  "date": "2026-10-23",
+  "owner": "Misfin native listener admission and joined shutdown",
+  "qualified_source": "7a23e0dcfdedec4dca67d1c4129208735ee36955",
+  "qualified_tree": "e3b933c94ecfed2a4ed691a3362af331758676e7",
+  "misfin_crate_tree": "487d09c0fa299407ce62bb07defacbbb5091a77f",
+  "base_source": "e72dbd4218ce0ebfb872bd37ac2522292eebc57b",
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "git_lock_blob": "aeee95e98a7f49618dd4be4316ea477a112a2268",
+  "lock_delta": "None. No manifest/dependency/registry changes; Tokio JoinSet uses existing runtime features.",
+  "native_source_sha256": {
+    "crates/misfin/src/server.rs": "8a7cb22284e74ee0ff35a13afd1a0cc1c4388b9f785238aa2a02f62ec331487f",
+    "crates/misfin/src/server_lifecycle_tests.rs": "ea45a52c9cc1b86304fefa8a0896c50dd1e4c68f9d09a3cd6b3306b578e86a82",
+    "crates/misfin/README.md": "f233b91799fe82c90fa65865e1f0684e0b925f51032362545fc71f9e94da2aa4"
+  },
+  "toolchain": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo 1.99.1 (5f94df478 2026-08-27)"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "C:\\t\\cargo-targets\\smolweb",
+    "CARGO_BUILD_BUILD_DIR": "C:\\t\\cargo-targets\\smolweb\\build",
+    "note": "Both variables explicitly set for all Cargo invocations in this task. Final gates explicitly use --locked --offline."
+  },
+  "commands": [
+    {
+      "command": "cargo test -p misfin -p errand --all-features --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 152,
+      "integration_passed": 14,
+      "doctest_passed": 1,
+      "failed": 0,
+      "ignored": 1,
+      "by_owner": {
+        "errand": { "unit": 69, "integration": 14, "doc": 1, "ignored": 1 },
+        "misfin_library": { "unit": 82, "doc": 0, "ignored": 0 },
+        "misfin_cli": { "unit": 1, "ignored": 0 }
+      },
+      "note": "AWS-LC selected with all features. Existing live Nex ignore unchanged. All prior sending/receiving deadline and native trust/status/store suites remain green. Normal parallel harness passes."
+    },
+    {
+      "command": "cargo test -p misfin --no-default-features --features server,ring --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 82,
+      "doctest_passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "note": "Independent ring-only native provider, including all 11 lifecycle cases."
+    },
+    {
+      "command_template": "cargo check -p misfin --no-default-features --locked --offline --quiet [--features <features>]",
+      "scope": "Six independent Cargo invocations; core means no feature flag.",
+      "results": [
+        { "features": "core", "exit_code": 0 },
+        { "features": "client,ring", "exit_code": 0 },
+        { "features": "client,aws-lc", "exit_code": 0 },
+        { "features": "server,ring", "exit_code": 0 },
+        { "features": "server,aws-lc", "exit_code": 0 },
+        { "features": "cli", "exit_code": 0 }
+      ]
+    },
+    {
+      "command": "cargo clippy -p misfin --all-features --all-targets --locked --offline --quiet --no-deps -- -D warnings",
+      "exit_code": 0,
+      "strict": true
+    },
+    {
+      "command": "rustfmt --edition 2024 --config skip_children=true --check crates/misfin/src/server.rs crates/misfin/src/server_lifecycle_tests.rs",
+      "exit_code": 0
+    },
+    { "command": "git diff --cached --check", "exit_code": 0 }
+  ],
+  "policy": {
+    "admission": "MisfinServerConfig::max_connections defaults to 32, nonzero. Each BoundMisfinServer owns a local JoinSet; its length guards accept before spawning, so TLS+request+response+close work cannot exceed the limit. Completed but unreaped tasks conservatively retain capacity until reaped. Pending peers remain subject to OS backlog limits; no overload mail reply is invented.",
+    "reaping": "Prioritize shutdown, then completed joins, then acceptance. Failed/panicked tasks are observed and release tracked capacity without terminating unrelated connections.",
+    "grace": "MisfinServerConfig::shutdown_grace defaults to 5s, zero allows immediate abort; overflow is a configuration error before TLS setup/binding. Capture the absolute grace deadline when shutdown wins select, drop listener before draining, allow admitted work to finish until that fixed deadline, then abort remaining tasks and await every terminal join.",
+    "join_guarantee": "Signalling shutdown and awaiting serve returns only after accepted connection futures have completed or been cancelled and joined. Grace is one shared window, not renewed per completed child or delayed drain poll. The same cleanup path handles a local post-accept configuration refusal.",
+    "dropping_serve": "Dropping the future drops the owned JoinSet and requests cancellation. Drop cannot await joins; asynchronous cleanup is separately observed in the native cancellation test. Do not infer the explicit-shutdown joined guarantee from Drop.",
+    "cooperative": "Grace bounds the graceful opportunity, not a hard preemption deadline for synchronous code. Abortion cannot interrupt synchronous mailbox work; terminal joins still wait. Committed mail remains stored even if cancellation prevents acknowledgement.",
+    "receiving": "Existing per-step 30s and whole-receive 120s defaults and complete framing unchanged. Whole receiving epoch starts at successful TCP acceptance; time waiting in OS backlog is not an accepted transaction. Sending APIs and mailbox trust/identity rules unchanged.",
+    "scope": "Per-listener connection task admission; not global process/browser memory, traffic, per-peer quotas or actor residency policy."
+  },
+  "coverage": {
+    "new_case_count": 11,
+    "actual_localhost_tcp_tls": [
+      "A completed first TLS handshake holds the sole slot; second native client remains queued for 700ms. Closing the first incomplete request frees capacity, second send returns 20 and stores exactly one message.",
+      "Identity-bearing admitted TLS peer submits after shutdown signal; exact 20/fingerprint reply and single stored body survive graceful drain before serve returns.",
+      "Admitted TLS peer stalled in request read receives its configured grace. Peer closure is observed after awaited serve; controlled drop guards independently qualify destruction before cleanup returns.",
+      "Native ClientHello/ServerHello proves admission inside handshake; withhold client Finished, signal shutdown, then verify grace expiry closes the peer without mail.",
+      "Zero grace aborts an admitted peer, closes listener, and joins before return.",
+      "Aborting serve requests child cancellation; separately awaited peer closure proves owned work does not remain detached."
+    ],
+    "controlled_tasks_and_pure_config": [
+      "Finite 32/5s defaults; zero limit and overflowing grace refuse with exact policy diagnostics before malformed TLS is inspected; zero grace accepted.",
+      "Started drop guards prove graceful and aborted child futures are dropped before finish returns, using one exact 5s paused-time window.",
+      "Zero-grace cleanup aborts and joins a known-started pending child.",
+      "Controlled child panic is reaped and does not strand another pending child; both drop guards observed.",
+      "Delay drain polling beyond its absolute deadline; cleanup aborts/joins without consuming a fresh grace window."
+    ],
+    "limits": "Native close accepts EOF/reset/abort transport outcomes; it never treats a read timeout as closure. These fixtures qualify in-process native library/TCP/TLS behavior, not installed CLI signal handling, headed product UI, external mailservers, radio or multiple machines. Prior receiving/send deadline cases remain regression coverage."
+  },
+  "family_survey": {
+    "tcp_siblings": "Gemini, Gopher, Finger, Nex and Spartan retain detached accepted tasks in their native server.rs APIs. Their I/O/handler deadline coverage and public config compatibility differ; each needs a separate qualified lifecycle slice.",
+    "guppy": "Inline UDP receive loop already bounds peer sessions; handler/shutdown responsiveness is a different gate from TCP task joining.",
+    "scroll_scorpion": "Single exchanges over caller-owned streams; listener admission and task lifetime remain with caller.",
+    "errand": "serve adapters project Source into native replies; no listener lifetime added to the facade.",
+    "djinn_armillary": "Existing Mere ports/djinn governed listeners use host policy, capacity controls and Armillary ResidentTasks::close_and_join. They are unchanged; native Misfin uses only its existing Tokio dependency. No new universal server runtime or product repin."
+  },
+  "review": "Bounded read-only Luna survey and production review found no blocker. Review refined backlog wording to respect OS limits; root strengthened native admission proof, Windows closure expectations and fixed observed-shutdown epoch coverage.",
+  "preliminary": "preliminary.json retains helper-path compilation failure, unsynchronized drop-guard failures, unlocked lane pass and Windows immediate-close expectation failures; final-source gates are separate.",
+  "resources": {
+    "shared_retained_evidence_cap_bytes": 100000000,
+    "retained_evidence": "Compact JSON and byte-preserving attributes only; no copied binaries/full logs.",
+    "new_isolated_targets": [],
+    "new_cargo_homes": [],
+    "new_worktrees": [],
+    "prior_unexpected_cache": "Prior receiving lane's policy-blocked generated cache under smolweb/target/build is preserved. This task creates no new output there and does not retry its rejected cleanup; ownership and reason remain recorded in misfin-receive-deadlines/preliminary.json."
+  },
+  "preserved": "Cargo.lock, sending code, receiving deadline test source, sibling protocol code, Errand facade, product pins, site snapshot V1 and previous receipts unchanged.",
+  "byte_convention": "Native SHA256 identifies Windows source bytes; Git source/tree identities identify normalized repository content. JSON and attributes are UTF-8 LF under -text. Qualification commit changes docs/receipts only."
+}
