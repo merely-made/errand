@@ -96,8 +96,8 @@ fn tls_acceptor() -> tokio_rustls::TlsAcceptor {
 }
 
 const IRI: &str = "text://x/";
-#[test]
-fn supplied_limits_are_exact_and_never_return_a_prefix() {
+#[tokio::test]
+async fn supplied_limits_are_exact_and_never_return_a_prefix() {
     let header = b"20 text/plain;charset=utf-8\r\n";
     for body in [b"".as_slice(), b"abcd", b"abcde"] {
         let mut stream = Probe::new(&[header.as_slice(), body].concat());
@@ -151,8 +151,8 @@ fn supplied_limits_are_exact_and_never_return_a_prefix() {
         assert_eq!(result.is_ok(), body.is_empty());
     }
 }
-#[test]
-fn header_budget_includes_crlf_and_missing_terminators_fail() {
+#[tokio::test]
+async fn header_budget_includes_crlf_and_missing_terminators_fail() {
     let header = b"30 text://next/\r\n";
     for cap in [header.len() - 1, header.len()] {
         let mut stream = Probe::new(header);
@@ -178,8 +178,8 @@ fn header_budget_includes_crlf_and_missing_terminators_fail() {
         ));
     }
 }
-#[test]
-fn overflow_refuses_while_response_is_still_open() {
+#[tokio::test]
+async fn overflow_refuses_while_response_is_still_open() {
     let mut stream = Probe::new(b"20 text/plain\r\nabcde");
     stream.hold = true;
     assert!(matches!(
@@ -194,8 +194,8 @@ fn overflow_refuses_while_response_is_still_open() {
         Err(ClientError::Limit(_))
     ));
 }
-#[test]
-fn default_header_preserves_old_counter_and_caller_can_raise_it() {
+#[tokio::test]
+async fn default_header_preserves_old_counter_and_caller_can_raise_it() {
     assert_eq!(Limits::default().max_header_line_bytes, 4097);
     for extra in [0, 1] {
         let header = format!("40 {}\r\n", "x".repeat(4097 - 5 + extra));

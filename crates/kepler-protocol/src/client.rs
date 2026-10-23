@@ -8,6 +8,8 @@
 //! declared rather than implied by the connection closing, which is the whole
 //! reason kepler exists.
 
+use std::time::Duration;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use url::Url;
@@ -39,6 +41,41 @@ impl Default for Limits {
     }
 }
 
+/// Size limits and one deadline for the complete operation, after request preflight.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Options {
+    pub limits: Limits,
+    pub operation_timeout: Duration,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            limits: Limits::default(),
+            operation_timeout: Duration::from_secs(30),
+        }
+    }
+}
+
+fn operation_deadline(timeout: Duration) -> Result<tokio::time::Instant, ClientError> {
+    if timeout.is_zero() {
+        return Err(ClientError::TimedOut);
+    }
+    let deadline = tokio::time::Instant::now()
+        .into_std()
+        .checked_add(timeout)
+        .ok_or_else(|| ClientError::Protocol("operation timeout exceeds the clock range".into()))?;
+    Ok(tokio::time::Instant::from_std(deadline))
+}
+
+pub(crate) fn check_deadline(deadline: tokio::time::Instant) -> Result<(), ClientError> {
+    if tokio::time::Instant::now() >= deadline {
+        Err(ClientError::TimedOut)
+    } else {
+        Ok(())
+    }
+}
+
 fn check_request(request_bytes: usize, limits: &Limits) -> Result<(), ClientError> {
     if limits.max_request_bytes == 0
         || request_bytes > limits.max_request_bytes
@@ -55,6 +92,8 @@ fn check_request(request_bytes: usize, limits: &Limits) -> Result<(), ClientErro
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientError {
     BadUrl(String),
+    /// The complete operation exceeded its configured deadline.
+    TimedOut,
     /// A caller-supplied wire budget was exceeded.
     Limit(String),
     Connect(String),
@@ -66,6 +105,7 @@ pub enum ClientError {
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::TimedOut => write!(f, "operation timed out"),
             Self::Limit(m) => write!(f, "limit: {m}"),
             Self::BadUrl(m) => write!(f, "bad url: {m}"),
             Self::Connect(m) => write!(f, "connect: {m}"),
@@ -113,13 +153,33 @@ pub async fn fetch(url: &str, last_cached: i64, language: &str) -> Result<Respon
     fetch_with_limits(url, last_cached, language, &Limits::default()).await
 }
 
-/// Fetch using caller-owned size budgets. Session deadlines remain caller-owned.
+/// Fetch using explicit size budgets and the default 30-second operation deadline.
 pub async fn fetch_with_limits(
     url: &str,
     last_cached: i64,
     language: &str,
     limits: &Limits,
 ) -> Result<Response, ClientError> {
+    fetch_with_options(
+        url,
+        last_cached,
+        language,
+        &Options {
+            limits: *limits,
+            ..Options::default()
+        },
+    )
+    .await
+}
+
+/// Fetch with a single deadline covering DNS, connect, TLS, request and response.
+pub async fn fetch_with_options(
+    url: &str,
+    last_cached: i64,
+    language: &str,
+    options: &Options,
+) -> Result<Response, ClientError> {
+    let limits = &options.limits;
     if url.len() > MAX_URI {
         return Err(ClientError::BadUrl(format!("URI exceeds {MAX_URI} bytes")));
     }
@@ -156,23 +216,28 @@ pub async fn fetch_with_limits(
 
     let line = request_line(url, last_cached, language);
 
+    #[cfg(not(feature = "tls"))]
     if secure {
-        #[cfg(feature = "tls")]
-        {
-            return crate::tls::exchange_tls(host, port, line.as_bytes(), limits).await;
-        }
-        #[cfg(not(feature = "tls"))]
-        {
-            return Err(ClientError::Connect(
-                "keplers:// needs the `tls` feature".into(),
-            ));
-        }
+        return Err(ClientError::Connect(
+            "keplers:// needs the `tls` feature".into(),
+        ));
     }
-
-    let stream = TcpStream::connect((host, port))
-        .await
-        .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
-    exchange_with_limits(stream, line.as_bytes(), limits).await
+    let deadline = operation_deadline(options.operation_timeout)?;
+    let result = tokio::time::timeout_at(deadline, async {
+        check_deadline(deadline)?;
+        #[cfg(feature = "tls")]
+        if secure {
+            return crate::tls::exchange_tls(host, port, line.as_bytes(), limits, deadline).await;
+        }
+        let stream = TcpStream::connect((host, port))
+            .await
+            .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
+        exchange_inner(stream, line.as_bytes(), limits, deadline).await
+    })
+    .await
+    .map_err(|_| ClientError::TimedOut)?;
+    check_deadline(deadline)?;
+    result
 }
 
 /// Run the exchange over any connected stream.
@@ -195,7 +260,48 @@ pub async fn exchange_with_limits<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    check_request(request.len(), limits)?;
+    exchange_with_options(
+        &mut stream,
+        request,
+        &Options {
+            limits: *limits,
+            ..Options::default()
+        },
+    )
+    .await
+}
+
+/// Exchange with one deadline. Discard a borrowed carrier after timeout or cancellation.
+pub async fn exchange_with_options<S>(
+    mut stream: S,
+    request: &[u8],
+    options: &Options,
+) -> Result<Response, ClientError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    check_request(request.len(), &options.limits)?;
+    let deadline = operation_deadline(options.operation_timeout)?;
+    let result = tokio::time::timeout_at(
+        deadline,
+        exchange_inner(&mut stream, request, &options.limits, deadline),
+    )
+    .await
+    .map_err(|_| ClientError::TimedOut)?;
+    check_deadline(deadline)?;
+    result
+}
+
+pub(crate) async fn exchange_inner<S>(
+    mut stream: S,
+    request: &[u8],
+    limits: &Limits,
+    deadline: tokio::time::Instant,
+) -> Result<Response, ClientError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    check_deadline(deadline)?;
     stream
         .write_all(request)
         .await
@@ -203,6 +309,7 @@ where
     let mut line = Vec::new();
     let mut byte = [0u8; 1];
     loop {
+        check_deadline(deadline)?;
         if stream
             .read(&mut byte)
             .await
@@ -241,6 +348,7 @@ where
         };
         let mut chunk = [0u8; 8192];
         loop {
+            check_deadline(deadline)?;
             let remaining = known_length.unwrap_or(limits.max_body_bytes) - body.len();
             if known_length.is_some() && remaining == 0 {
                 break;

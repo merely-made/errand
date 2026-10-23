@@ -115,8 +115,35 @@ The native client accepts `Limits` (32 MiB body by default). Declared lengths
 are checked before allocation; unknown-length bodies refuse the first byte
 over the cap rather than returning a successful prefix. Partial responses obey
 the caller's body cap while preserving the requested range as a frame boundary,
-so a following interactive status line is left unread. Callers own the overall
-operation deadline, including connection setup and interactive sessions.
+so a following interactive status line is left unread.
+
+## Operation deadlines
+
+`client::Options { limits, operation_timeout }` keeps size and time policy
+separate. `fetch_with_options`, `exchange_with_options` and
+`read_response_with_options` select one budget for the complete operation;
+the existing helpers use 30 seconds. TCP fetch includes name resolution,
+connection setup, writes, status and body reads. Activity does not renew the
+allowance. Zero refuses immediately with `ClientError::TimedOut`; a duration
+the clock cannot represent returns `InvalidTimeout`, before I/O or a timer.
+Malformed fetch URLs and secure URLs passed to plaintext fetch are also
+refused before a timer or network contact.
+
+For a session with several phases, choose one absolute `tokio::time::Instant`
+and pass it to `tls::connect_with_deadline`, `client::exchange_until` and
+`client::read_response_until`. The same deadline can cover the TLS handshake,
+the first response and later statuses without resetting between them. Native
+range boundaries and status metadata remain intact. `tls::connect_with` uses
+a 30-second setup budget; the supplied verifier still owns certificate trust.
+
+Owned TCP fetch drops its socket on timeout or cancellation. A borrowed stream
+must be discarded after either: an interrupted write or partial response is
+not a usable next-frame boundary. These helpers bound individual operations,
+rather than idle session lifetime. They retain the existing framed exchange
+API; the caller drives send/interactive phases. Valid client operations require
+a Tokio time driver; grammar-only builds remain independent of Tokio. Deadline
+checks reject late completion, but blocking inside a custom carrier's poll still
+delays cancellation.
 
 ## License
 

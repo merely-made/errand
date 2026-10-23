@@ -165,6 +165,7 @@ fn parse_link(rest: &str) -> LinkLine {
 
 #[cfg(feature = "client")]
 mod client {
+    use std::time::Duration;
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -185,6 +186,42 @@ mod client {
                 max_header_line_bytes: 4097,
                 max_body_bytes: 64 * 1024 * 1024,
             }
+        }
+    }
+
+    /// Size limits and one deadline for the complete operation after request preflight.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Options {
+        pub limits: Limits,
+        pub operation_timeout: Duration,
+    }
+    impl Default for Options {
+        fn default() -> Self {
+            Self {
+                limits: Limits::default(),
+                operation_timeout: Duration::from_secs(30),
+            }
+        }
+    }
+    pub(super) fn operation_deadline(
+        timeout: Duration,
+    ) -> Result<tokio::time::Instant, ClientError> {
+        if timeout.is_zero() {
+            return Err(ClientError::TimedOut);
+        }
+        let deadline = tokio::time::Instant::now()
+            .into_std()
+            .checked_add(timeout)
+            .ok_or_else(|| {
+                ClientError::Protocol("operation timeout exceeds the clock range".into())
+            })?;
+        Ok(tokio::time::Instant::from_std(deadline))
+    }
+    pub(super) fn check_deadline(deadline: tokio::time::Instant) -> Result<(), ClientError> {
+        if tokio::time::Instant::now() >= deadline {
+            Err(ClientError::TimedOut)
+        } else {
+            Ok(())
         }
     }
 
@@ -210,6 +247,8 @@ mod client {
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum ClientError {
         BadUrl(String),
+        /// The complete operation exceeded its configured deadline.
+        TimedOut,
         /// A caller-supplied wire budget was exceeded.
         Limit(String),
         Connect(String),
@@ -221,6 +260,7 @@ mod client {
     impl std::fmt::Display for ClientError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
+                Self::TimedOut => write!(f, "operation timed out"),
                 Self::Limit(m) => write!(f, "limit: {m}"),
                 Self::BadUrl(m) => write!(f, "bad url: {m}"),
                 Self::Connect(m) => write!(f, "connect: {m}"),
@@ -246,6 +286,19 @@ mod client {
 
     /// Fetch over TCP with caller-owned size budgets.
     pub async fn fetch_with_limits(iri: &str, limits: &Limits) -> Result<Response, ClientError> {
+        fetch_with_options(
+            iri,
+            &Options {
+                limits: *limits,
+                ..Options::default()
+            },
+        )
+        .await
+    }
+
+    /// Fetch with one budget across DNS, connect, request and response.
+    pub async fn fetch_with_options(iri: &str, options: &Options) -> Result<Response, ClientError> {
+        let limits = &options.limits;
         check_request(iri, limits)?;
         let parsed = url::Url::parse(iri).map_err(|e| ClientError::BadUrl(e.to_string()))?;
         if parsed.scheme() != "text" {
@@ -258,10 +311,18 @@ mod client {
             .host_str()
             .ok_or_else(|| ClientError::BadUrl("text IRI has no host".into()))?;
         let port = parsed.port().unwrap_or(DEFAULT_PORT);
-        let mut stream = TcpStream::connect((host, port))
-            .await
-            .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
-        exchange_with_limits(iri, &mut stream, limits).await
+        let deadline = operation_deadline(options.operation_timeout)?;
+        let result = tokio::time::timeout_at(deadline, async {
+            check_deadline(deadline)?;
+            let mut stream = TcpStream::connect((host, port))
+                .await
+                .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
+            exchange_inner(iri, &mut stream, limits, deadline).await
+        })
+        .await
+        .map_err(|_| ClientError::TimedOut)?;
+        check_deadline(deadline)?;
+        result
     }
 
     /// Run the exchange over any connected stream, so an encrypted carrier
@@ -282,7 +343,48 @@ mod client {
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
-        check_request(iri, limits)?;
+        exchange_with_options(
+            iri,
+            stream,
+            &Options {
+                limits: *limits,
+                ..Options::default()
+            },
+        )
+        .await
+    }
+
+    /// Exchange with one deadline. Discard the borrowed carrier after timeout or cancellation.
+    pub async fn exchange_with_options<S>(
+        iri: &str,
+        stream: &mut S,
+        options: &Options,
+    ) -> Result<Response, ClientError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        check_request(iri, &options.limits)?;
+        let deadline = operation_deadline(options.operation_timeout)?;
+        let result = tokio::time::timeout_at(
+            deadline,
+            exchange_inner(iri, stream, &options.limits, deadline),
+        )
+        .await
+        .map_err(|_| ClientError::TimedOut)?;
+        check_deadline(deadline)?;
+        result
+    }
+
+    pub(super) async fn exchange_inner<S>(
+        iri: &str,
+        stream: &mut S,
+        limits: &Limits,
+        deadline: tokio::time::Instant,
+    ) -> Result<Response, ClientError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        check_deadline(deadline)?;
         stream
             .write_all(request_line(iri).as_bytes())
             .await
@@ -290,6 +392,7 @@ mod client {
         let mut line = Vec::new();
         let mut byte = [0u8; 1];
         loop {
+            check_deadline(deadline)?;
             if stream
                 .read(&mut byte)
                 .await
@@ -320,6 +423,7 @@ mod client {
         if header.status == super::Status::Ok {
             let mut chunk = [0u8; 8192];
             loop {
+                check_deadline(deadline)?;
                 let remaining = limits.max_body_bytes - body.len();
                 let read_size = remaining.saturating_add(1).min(chunk.len());
                 let count = stream
@@ -341,7 +445,8 @@ mod client {
 
 #[cfg(feature = "client")]
 pub use client::{
-    ClientError, Limits, Response, exchange, exchange_with_limits, fetch, fetch_with_limits,
+    ClientError, Limits, Options, Response, exchange, exchange_with_limits, exchange_with_options,
+    fetch, fetch_with_limits, fetch_with_options,
 };
 
 /// Fetch over TLS (the port the spec names Gemini). Certificates are accepted
@@ -356,6 +461,20 @@ pub async fn fetch_tls(iri: &str) -> Result<Response, ClientError> {
 /// Fetch over TLS with caller-owned size budgets and existing certificate policy.
 #[cfg(feature = "tls")]
 pub async fn fetch_tls_with_limits(iri: &str, limits: &Limits) -> Result<Response, ClientError> {
+    fetch_tls_with_options(
+        iri,
+        &Options {
+            limits: *limits,
+            ..Options::default()
+        },
+    )
+    .await
+}
+
+/// Fetch over TLS with one deadline covering DNS, handshake, request and response.
+#[cfg(feature = "tls")]
+pub async fn fetch_tls_with_options(iri: &str, options: &Options) -> Result<Response, ClientError> {
+    let limits = &options.limits;
     client::check_request(iri, limits)?;
     let parsed = url::Url::parse(iri).map_err(|e| ClientError::BadUrl(e.to_string()))?;
     if parsed.scheme() != "text" {
@@ -369,8 +488,15 @@ pub async fn fetch_tls_with_limits(iri: &str, limits: &Limits) -> Result<Respons
         .ok_or_else(|| ClientError::BadUrl("text IRI has no host".into()))?
         .to_string();
     let port = parsed.port().unwrap_or(DEFAULT_TLS_PORT);
-    let mut stream = tls::connect(&host, port).await?;
-    client::exchange_with_limits(iri, &mut stream, limits).await
+    let deadline = client::operation_deadline(options.operation_timeout)?;
+    let result = tokio::time::timeout_at(deadline, async {
+        let mut stream = tls::connect(&host, port, deadline).await?;
+        client::exchange_inner(iri, &mut stream, limits, deadline).await
+    })
+    .await
+    .map_err(|_| ClientError::TimedOut)?;
+    client::check_deadline(deadline)?;
+    result
 }
 
 #[cfg(feature = "tls")]
@@ -388,7 +514,9 @@ mod tls {
     pub(crate) async fn connect(
         host: &str,
         port: u16,
+        deadline: tokio::time::Instant,
     ) -> Result<tokio_rustls::client::TlsStream<TcpStream>, ClientError> {
+        super::client::check_deadline(deadline)?;
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let config = rustls::ClientConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()
@@ -396,11 +524,13 @@ mod tls {
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(AcceptAny))
             .with_no_client_auth();
+        super::client::check_deadline(deadline)?;
         let tcp = TcpStream::connect((host, port))
             .await
             .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
         let name = ServerName::try_from(host.to_string())
             .map_err(|e| ClientError::Connect(format!("server name {host}: {e}")))?;
+        super::client::check_deadline(deadline)?;
         TlsConnector::from(Arc::new(config))
             .connect(name, tcp)
             .await
@@ -576,3 +706,6 @@ mod tests {
 
 #[cfg(all(test, feature = "client"))]
 mod limits_tests;
+
+#[cfg(all(test, feature = "client"))]
+mod deadline_tests;

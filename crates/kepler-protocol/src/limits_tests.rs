@@ -96,8 +96,8 @@ fn tls_acceptor() -> tokio_rustls::TlsAcceptor {
 }
 
 const REQUEST: &[u8] = b"kepler://x/ 0 en\r\n";
-#[test]
-fn supplied_limits_are_exact_and_never_return_a_prefix() {
+#[tokio::test]
+async fn supplied_limits_are_exact_and_never_return_a_prefix() {
     let mut empty = Probe::new(b"");
     assert!(matches!(
         ready(exchange_with_limits(
@@ -165,8 +165,8 @@ fn supplied_limits_are_exact_and_never_return_a_prefix() {
         assert_eq!(result.is_ok(), body.is_empty());
     }
 }
-#[test]
-fn header_budget_includes_crlf_and_missing_terminators_fail() {
+#[tokio::test]
+async fn header_budget_includes_crlf_and_missing_terminators_fail() {
     let header = b"70 123\r\n";
     for cap in [header.len() - 1, header.len()] {
         let mut stream = Probe::new(header);
@@ -196,8 +196,8 @@ fn header_budget_includes_crlf_and_missing_terminators_fail() {
         ));
     }
 }
-#[test]
-fn known_length_rejects_short_eof_and_leaves_following_bytes_unread() {
+#[tokio::test]
+async fn known_length_rejects_short_eof_and_leaves_following_bytes_unread() {
     let mut stream = Probe::new(b"20 4 12 34 text/plain\r\nabcdNEXT");
     let response = ready(exchange_with_limits(
         &mut stream,
@@ -233,8 +233,8 @@ fn known_length_rejects_short_eof_and_leaves_following_bytes_unread() {
     );
     assert_eq!(&zero.input[zero.cursor..], b"NEXT");
 }
-#[test]
-fn declared_oversize_refuses_before_any_body_or_eof_arrives() {
+#[tokio::test]
+async fn declared_oversize_refuses_before_any_body_or_eof_arrives() {
     let mut stream = Probe::new(b"20 5 -1 -1 text/plain\r\n");
     stream.hold = true;
     assert!(matches!(
@@ -249,8 +249,8 @@ fn declared_oversize_refuses_before_any_body_or_eof_arrives() {
         Err(ClientError::Limit(_))
     ));
 }
-#[test]
-fn default_header_preserves_old_counter_and_caller_can_raise_it() {
+#[tokio::test]
+async fn default_header_preserves_old_counter_and_caller_can_raise_it() {
     assert_eq!(Limits::default().max_header_line_bytes, MAX_URI + 1);
     for extra in [0, 1] {
         let header = format!("51 {}\r\n", "x".repeat(MAX_URI + 1 - 5 + extra));
@@ -416,8 +416,8 @@ async fn caller_can_raise_full_request_budget_without_relaxing_uri_ceiling() {
     server.await.unwrap();
 }
 
-#[test]
-fn unknown_body_overflow_refuses_without_waiting_for_eof() {
+#[tokio::test]
+async fn unknown_body_overflow_refuses_without_waiting_for_eof() {
     let mut stream = Probe::new(b"20 -1 -1 -1 text/plain\r\nabcde");
     stream.hold = true;
     assert!(matches!(

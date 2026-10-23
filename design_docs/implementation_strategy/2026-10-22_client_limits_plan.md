@@ -1,8 +1,9 @@
 # Client receive limits
 
-**Status (2026-10-22):** phases 1 to 5 landed and qualified: routed clients,
+**Status (2026-10-23):** phases 1 to 5 landed and qualified: routed clients,
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
-size and framing limits. Session and mail deadlines remain open in phase 6.
+size and framing limits. Session operation deadlines are in progress in phase 6;
+mail deadlines remain separately queued in phase 7.
 
 ## Ownership and scope
 
@@ -21,7 +22,7 @@ its outer deadline including graceful endpoint shutdown. Mere owns the
 page/subresource policy and the bodyless document fetch adapter. These are
 consumer boundaries, rather than a new shared transport runtime.
 
-The standalone slice works on smolweb main. Its four native client crates own
+The standalone slices work on smolweb main. The five native client crates own
 their limits; this does not add Errand routes or product adapters. No active
 consumer of these client APIs was found in Mere, Turnstone, Knot or Genet;
 patch-table entries alone do not require consumer repins. Earlier consumer
@@ -63,13 +64,49 @@ receipts. New receipt hashes must state their Git/native byte convention.
    overflow, early request refusal and native framing, and each crate builds
    independently as grammar-only, native client and (where available) TLS.
    Retain compact command/source/lock receipts within the shared 100 MB cap.
-6. Qualify session and mail deadlines separately. DICT, Kepler and Text still
-   need caller-selected operation deadlines; Scorpion needs a caller deadline
-   around its existing session/framing API. Misfin's existing per-step deadlines
-   stay distinct from whole-send policy. Done when the owner's timeout tests
-   qualify each API; size-limit or routed Errand evidence cannot close this phase.
+6. Bound native session operations in DICT, FSP, Kepler, Text and Scorpion.
+   Native `Options` keep size limits separate from `operation_timeout`, with a
+   configurable 30-second convenience default. One budget spans setup and all
+   nested writes/reads, retries or blocks; activity never renews it. A new
+   command receives a fresh allowance, rather than charging idle session time.
+   DICT/FSP retire interrupted sessions before another write. Borrowed Kepler,
+   Text and Scorpion carriers remain caller-owned and must be discarded after
+   interruption; Scorpion exposes absolute deadlines for multiple framed
+   responses and TLS setup. Done when paused-time tests, cancellation controls,
+   native TCP/UDP/TLS fixtures, pure invalid-request preflight, independent
+   feature builds and strict Clippy qualify the exact source. Existing size,
+   metadata and framing tests remain green. Retain new compact receipts within
+   the shared 100 MB cap without replacing previous evidence.
+7. Qualify mail deadlines separately. Misfin's existing per-step deadlines stay
+   distinct from whole-send policy. Done when mail-owned whole-send timeout and
+   cancellation tests qualify that API; session or routed Errand evidence cannot
+   close this phase.
 
-## Findings (2026-10-22)
+## Findings
+
+### 2026-10-23
+
+- Tokio's timeout polls the operation before its timer. Native completion and
+  ready-carrier read checks must also compare the absolute deadline, so a late
+  ready result cannot become success. These are cooperative async deadlines;
+  they cannot preempt blocking work inside a carrier's poll.
+- DICT can retain its existing unusable flag before the first command I/O,
+  clearing it only after a complete response. Dropping a polled future then
+  leaves the session retired without introducing a shared session runtime.
+  Unpolled futures and local request refusals preserve a healthy session.
+- FSP has a second state boundary beyond its retry timeout: an unanswered or
+  interrupted request leaves the server key uncertain. Such sessions now
+  require reconnection, including after exhausted retries. Accepted `CC_ERR`
+  replies update the key and remain usable, as do post-reply aggregate refusals.
+- Scorpion's borrowed framed API needs one caller-owned absolute deadline
+  across TLS setup and subsequent statuses. Its verifier/resumption policy
+  remains unchanged. Plain TCP fetch now refuses a secure-scheme request
+  before a timer/contact, matching the existing native transport contract.
+- No active product client consumer was found for the standalone native APIs;
+  Scorpion likewise appears only in patch plumbing. Native supplier delivery
+  does not require new Errand routes or product repins.
+
+### 2026-10-22
 
 - Standalone DICT response accounting must span every definition block and the
   final status, counting raw bytes before dot unstuffing and every empty line.
@@ -119,6 +156,12 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: started session deadlines in native DICT, FSP, Kepler/Text and
+  Scorpion ownership lanes. Preserve byte-only `Limits` structs, FSP's existing
+  per-reply retry timing, native transport/trust boundaries and caller actor
+  lifetime. A timeout must refuse success after the absolute deadline even
+  when a supplied carrier stays ready. Mail remains phase 7; no Misfin edits.
 
 - 2026-10-22: standalone source `f04b4fa3` completes phase 5. The combined
   exact-source gate passes 106 unit tests and seven doctests, ten independent

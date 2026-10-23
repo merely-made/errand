@@ -73,7 +73,26 @@ contracts.
 Retries still default to three attempts and `RESEND_AFTER` (one second) for each
 reply. Within the packet budgets, stale or corrupt replies are discarded under
 that same reply deadline.
-These budgets do not introduce a session or whole-operation deadline.
+`Options { limits, operation_timeout }` adds a caller-selected whole-operation
+allowance, defaulting to 30 seconds. `connect_with_options` includes UDP setup
+and host resolution; existing constructors select the default allowance.
+Each `version`, `request`, `get_file_block`, `get_file`, `list`, or `bye` receives
+a fresh allowance. A whole file or directory shares one absolute deadline across
+all blocks and retries. Idle time between operations does not consume it.
+`operation_timeout()` reads this policy; `set_operation_timeout` changes later
+operations. Zero refuses locally with `OperationTimedOut`; overflowing durations
+are refused before timer or connection work. Existing reply retry exhaustion
+still reports `TimedOut`, separately from the whole-operation deadline.
+
+If a deadline or caller cancellation interrupts an in-flight UDP request, the
+server's next key is uncertain. The session then refuses further commands and
+policy changes with `SessionUnusable`; reconnect to continue. Exhausting the
+existing reply retry budget also retires an in-flight session. A local request
+refusal, zero operation budget before I/O, or post-reply aggregate limit does
+not retire a healthy session. Accepted `CC_ERR` replies update the key and leave
+the session usable. Already accepted reply/key state remains usable if later
+local processing crosses the deadline; the operation still returns a timeout.
+Queued stale replies never satisfy a subsequent request's different sequence.
 
 ## Layers
 

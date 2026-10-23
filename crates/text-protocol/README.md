@@ -54,8 +54,28 @@ or writing. Headers require CRLF. Header and body overflow returns
 `ClientError::Limit`, never a successful prefix; unknown-length bodies read
 only a bounded overflow probe before refusing. Zero request/header budgets
 refuse, while a zero body budget permits an empty success. Status and MIME
-metadata retain their existing representation. Callers own session deadlines
-and cancellation; this API adds no timers.
+metadata retain their existing representation.
+
+## Operation deadlines
+
+`Options { limits, operation_timeout }` selects one deadline for the complete
+operation. Use `fetch_with_options(iri, &options)`,
+`fetch_tls_with_options(iri, &options)`, or
+`exchange_with_options(iri, stream, &options)`. DNS, TCP, TLS, request writing,
+headers and body share that budget; progress does not restart it. Existing
+helpers, including `_with_limits`, choose a finite 30-second timeout while
+preserving their size limits.
+
+Pure request validation precedes any timer or network contact. A zero timeout
+returns `ClientError::TimedOut` immediately; an unrepresentable timeout is a
+protocol error. Completion after the absolute deadline is also refused, even
+when the carrier never yields. Valid client operations require a Tokio runtime
+with time enabled; grammar-only builds remain dependency-free.
+
+Owned fetch transports are dropped on timeout. Discard a borrowed carrier
+after a timed-out or cancelled exchange, because partial request or response
+bytes may already have crossed it. There is no implicit drain or retry. TLS
+certificate behavior remains unchanged.
 
 ## License
 

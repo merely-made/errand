@@ -15,14 +15,16 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
-use crate::client::{ClientError, Limits, Response, exchange_with_limits};
+use crate::client::{ClientError, Limits, Response, exchange_inner};
 
 pub(crate) async fn exchange_tls(
     host: &str,
     port: u16,
     request: &[u8],
     limits: &Limits,
+    deadline: tokio::time::Instant,
 ) -> Result<Response, ClientError> {
+    crate::client::check_deadline(deadline)?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
@@ -31,17 +33,19 @@ pub(crate) async fn exchange_tls(
         .with_custom_certificate_verifier(Arc::new(AcceptAny))
         .with_no_client_auth();
 
+    crate::client::check_deadline(deadline)?;
     let tcp = TcpStream::connect((host, port))
         .await
         .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
     let name = ServerName::try_from(host.to_string())
         .map_err(|e| ClientError::Connect(format!("server name {host}: {e}")))?;
+    crate::client::check_deadline(deadline)?;
     let stream = TlsConnector::from(Arc::new(config))
         .connect(name, tcp)
         .await
         .map_err(|e| ClientError::Connect(format!("tls handshake: {e}")))?;
 
-    exchange_with_limits(stream, request, limits).await
+    exchange_inner(stream, request, limits, deadline).await
 }
 
 /// Accepts any certificate. See the module note: this is confidentiality

@@ -21,6 +21,7 @@ client = ["dep:tokio"]
 tokio = { version = "1", default-features = false, features = [
     "net",
     "io-util",
+    "time",
 ], optional = true }
 
 [dev-dependencies]
@@ -29,4 +30,5 @@ tokio = { version = "1", default-features = false, features = [
     "rt",
     "io-util",
     "time",
+    "test-util",
 ] }

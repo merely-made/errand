@@ -67,8 +67,31 @@ Commands containing CR or LF are refused before writing. Request preflight
 failures leave the session usable. A receive or write failure leaves it unusable
 for further commands; partial replies are never drained without a budget.
 `Session::command` only reads the initial status, so use the high-level methods
-for complete response handling. Hosts remain responsible for operation deadlines
-and for discarding sessions after cancelling an operation.
+for complete response handling.
+
+## Operation deadlines
+
+`Session::connect_with_options(host, port, options)` and
+`Session::over_with_options(stream, options)` accept
+`Options { limits: Limits, operation_timeout: Duration }`. The default allowance
+is 30 seconds; existing constructors use that finite default and retain the
+same byte limits. The session stores the selected allowance.
+
+Connection setup shares one deadline across DNS, TCP and the complete greeting.
+A supplied carrier's earlier establishment remains the caller's responsibility.
+Every subsequent command starts a fresh deadline covering its write and complete
+response. `DEFINE` includes all definitions and the final trailer; receiving more
+bytes does not renew the allowance. Idle time between commands does not count.
+The low-level `command` method still reads only the initial status.
+
+Zero timeout returns `ClientError::TimedOut` before timer or I/O; an
+unrepresentable timeout returns `ClientError::Protocol`. Limits and outgoing
+commands are validated before starting their operation timer. Timeout or dropping
+a polled, incomplete command future leaves the session unusable, and later
+commands fail before writing. Dropping an unpolled future or refusing a request
+in preflight leaves a healthy session usable. Partial replies are never drained.
+These deadlines bound asynchronous waiting and are checked while consuming ready
+data; they cannot preempt synchronous work or a carrier that blocks inside a poll.
 
 ## Layers
 

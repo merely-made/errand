@@ -23,6 +23,7 @@ tls = ["client", "dep:rustls", "dep:tokio-rustls"]
 url = { version = "2.5", optional = true }
 tokio = { version = "1", default-features = false, features = [
     "net",
+    "time",
     "io-util",
 ], optional = true }
 rustls = { version = "0.23", default-features = false, features = [
@@ -39,6 +40,7 @@ tokio-rustls = { version = "0.26", default-features = false, features = [
 rcgen = "0.13"
 tokio = { version = "1", default-features = false, features = [
     "macros",
+    "test-util",
     "rt",
     "io-util",
 ] }

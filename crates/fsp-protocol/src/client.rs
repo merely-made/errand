@@ -35,9 +35,8 @@ use crate::wire::{
 /// The specification's minimum wait before a resend.
 pub const RESEND_AFTER: Duration = Duration::from_secs(1);
 
-/// Caller-owned byte and entry budgets. These do not add a session or whole-
-/// operation deadline: `Session::attempts` and `Session::timeout` retain their
-/// existing per-reply retry semantics. `MAX_PAYLOAD` is the client's block
+/// Caller-owned byte and entry budgets. `Session::attempts` and
+/// `Session::timeout` retain their per-reply retry semantics. `MAX_PAYLOAD` is the client's block
 /// completion threshold, not a hard reply-data ceiling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -67,6 +66,24 @@ impl Default for Limits {
     }
 }
 
+/// Connection and operation policy. Every public operation receives a fresh
+/// allowance; one file/list allowance spans every block and retry. This is not
+/// an idle-session lifetime cap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Options {
+    pub limits: Limits,
+    pub operation_timeout: Duration,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            limits: Limits::default(),
+            operation_timeout: Duration::from_secs(30),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientError {
     Connect(String),
@@ -77,6 +94,10 @@ pub enum ClientError {
     Refused(String),
     /// No valid reply arrived within the retry budget.
     TimedOut,
+    /// The complete operation exhausted its caller-selected allowance.
+    OperationTimedOut,
+    /// An interrupted request left the server key uncertain; reconnect.
+    SessionUnusable,
     /// A configured byte or entry budget was exceeded; no prefix is returned.
     LimitExceeded {
         what: &'static str,
@@ -94,6 +115,10 @@ impl std::fmt::Display for ClientError {
             Self::Protocol(m) => write!(f, "protocol: {m}"),
             Self::Refused(m) => write!(f, "server refused: {m}"),
             Self::TimedOut => write!(f, "no reply within the retry budget"),
+            Self::OperationTimedOut => write!(f, "operation timed out"),
+            Self::SessionUnusable => {
+                write!(f, "session has an interrupted request; reconnect required")
+            }
             Self::LimitExceeded { what, max } => write!(f, "{what} exceeds configured limit {max}"),
             Self::OffsetOverflow => write!(f, "FSP block offset exceeds 32 bits"),
         }
@@ -115,6 +140,10 @@ pub struct Session {
     key: u16,
     sequence: u16,
     limits: Limits,
+    operation_timeout: Duration,
+    /// Remains set when a request future is cancelled, expires, or fails before
+    /// an accepted reply makes the next server key known.
+    in_flight: bool,
     /// How many times a request is sent before giving up.
     pub attempts: u32,
     pub timeout: Duration,
@@ -132,27 +161,83 @@ impl Session {
         port: Option<u16>,
         limits: Limits,
     ) -> Result<Self, ClientError> {
-        let port = port.unwrap_or(crate::wire::DEFAULT_PORT);
-        let socket = UdpSocket::bind("0.0.0.0:0")
-            .await
-            .map_err(|e| ClientError::Connect(e.to_string()))?;
-        socket
-            .connect((host, port))
-            .await
-            .map_err(|e| ClientError::Connect(format!("udp {host}:{port}: {e}")))?;
-        Ok(Self {
-            socket,
-            key: 0,
-            sequence: 1,
-            limits,
-            attempts: 3,
-            timeout: RESEND_AFTER,
+        Self::connect_with_options(
+            host,
+            port,
+            Options {
+                limits,
+                ..Options::default()
+            },
+        )
+        .await
+    }
+
+    /// Open with caller-selected operation and size policy. The connect
+    /// allowance includes UDP setup and host resolution.
+    pub async fn connect_with_options(
+        host: &str,
+        port: Option<u16>,
+        options: Options,
+    ) -> Result<Self, ClientError> {
+        let deadline = operation_deadline(options.operation_timeout)?;
+        let session = tokio::time::timeout_at(deadline, async {
+            check_deadline(deadline)?;
+            let port = port.unwrap_or(crate::wire::DEFAULT_PORT);
+            let socket = UdpSocket::bind("0.0.0.0:0")
+                .await
+                .map_err(|e| ClientError::Connect(e.to_string()))?;
+            check_deadline(deadline)?;
+            socket
+                .connect((host, port))
+                .await
+                .map_err(|e| ClientError::Connect(format!("udp {host}:{port}: {e}")))?;
+            check_deadline(deadline)?;
+            Ok::<Self, ClientError>(Self {
+                socket,
+                key: 0,
+                sequence: 1,
+                limits: options.limits,
+                operation_timeout: options.operation_timeout,
+                in_flight: false,
+                attempts: 3,
+                timeout: RESEND_AFTER,
+            })
         })
+        .await
+        .map_err(|_| ClientError::OperationTimedOut)??;
+        check_deadline(deadline)?;
+        Ok(session)
     }
 
     /// The immutable budget snapshot selected when this session was opened.
     pub fn limits(&self) -> Limits {
         self.limits
+    }
+
+    pub fn operation_timeout(&self) -> Duration {
+        self.operation_timeout
+    }
+
+    /// Select the allowance for later operations. Zero is a local refusal;
+    /// changing policy cannot revive an interrupted session.
+    pub fn set_operation_timeout(&mut self, timeout: Duration) -> Result<(), ClientError> {
+        self.ensure_usable()?;
+        validate_operation_timeout(timeout)?;
+        self.operation_timeout = timeout;
+        Ok(())
+    }
+
+    fn ensure_usable(&self) -> Result<(), ClientError> {
+        if self.in_flight {
+            Err(ClientError::SessionUnusable)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn start_operation(&self) -> Result<tokio::time::Instant, ClientError> {
+        self.ensure_usable()?;
+        operation_deadline(self.operation_timeout)
     }
 
     fn path_bytes(&self, path: &str) -> Result<Vec<u8>, ClientError> {
@@ -189,8 +274,13 @@ impl Session {
 
     /// The server version string.
     pub async fn version(&mut self) -> Result<String, ClientError> {
-        let reply = self.request(Command::Version, &[], 0).await?;
-        Ok(trim_nul(&reply.data))
+        let deadline = self.start_operation()?;
+        let reply = self
+            .request_until(Command::Version, &[], 0, deadline)
+            .await?;
+        let version = trim_nul(&reply.data);
+        check_deadline(deadline)?;
+        Ok(version)
     }
 
     /// Fetch one block of a file at `offset`. An empty block is end of file.
@@ -199,18 +289,28 @@ impl Session {
         path: &str,
         offset: u32,
     ) -> Result<Vec<u8>, ClientError> {
+        let deadline = self.start_operation()?;
         let data = self.path_bytes(path)?;
-        let reply = self.request(Command::GetFile, &data, offset).await?;
+        let reply = self
+            .request_until(Command::GetFile, &data, offset, deadline)
+            .await?;
+        check_deadline(deadline)?;
         Ok(reply.data)
     }
 
     /// Fetch a whole file, block by block.
     pub async fn get_file(&mut self, path: &str) -> Result<Vec<u8>, ClientError> {
+        let deadline = self.start_operation()?;
         let data = self.path_bytes(path)?;
         let mut body = Vec::new();
         let mut offset = 0;
         loop {
-            let block = self.request(Command::GetFile, &data, offset).await?.data;
+            check_deadline(deadline)?;
+            let block = self
+                .request_until(Command::GetFile, &data, offset, deadline)
+                .await?
+                .data;
+            check_deadline(deadline)?;
             if block.is_empty() {
                 return Ok(body);
             }
@@ -223,6 +323,7 @@ impl Session {
             let next = advance_offset(offset, block.len())?;
             let short = block.len() < MAX_PAYLOAD;
             body.extend_from_slice(&block);
+            check_deadline(deadline)?;
             if short {
                 return Ok(body);
             }
@@ -234,12 +335,17 @@ impl Session {
     /// decoded entry count are independently bounded. Native SKIP padding moves
     /// to the next packet; an explicit END marker completes the directory.
     pub async fn list(&mut self, path: &str) -> Result<Vec<DirEntry>, ClientError> {
+        let deadline = self.start_operation()?;
         let data = self.path_bytes(path)?;
         let mut entries = Vec::new();
         let mut received = 0usize;
         let mut offset = 0;
         loop {
-            let reply = self.request(Command::GetDir, &data, offset).await?;
+            check_deadline(deadline)?;
+            let reply = self
+                .request_until(Command::GetDir, &data, offset, deadline)
+                .await?;
+            check_deadline(deadline)?;
             if reply.data.is_empty() {
                 return Ok(entries);
             }
@@ -262,6 +368,7 @@ impl Session {
             })?;
             received += reply.data.len();
             entries.extend(block.entries);
+            check_deadline(deadline)?;
             if block.finished {
                 return Ok(entries);
             }
@@ -271,7 +378,9 @@ impl Session {
 
     /// End the session politely.
     pub async fn bye(mut self) -> Result<(), ClientError> {
-        self.request(Command::Bye, &[], 0).await.map(|_| ())
+        let deadline = self.start_operation()?;
+        self.request_until(Command::Bye, &[], 0, deadline).await?;
+        check_deadline(deadline)
     }
 
     /// Send a command and wait for the reply that echoes our sequence.
@@ -281,6 +390,20 @@ impl Session {
         data: &[u8],
         file_position: u32,
     ) -> Result<Packet, ClientError> {
+        let deadline = self.start_operation()?;
+        self.request_until(command, data, file_position, deadline)
+            .await
+    }
+
+    async fn request_until(
+        &mut self,
+        command: Command,
+        data: &[u8],
+        file_position: u32,
+        deadline: tokio::time::Instant,
+    ) -> Result<Packet, ClientError> {
+        self.ensure_usable()?;
+        check_deadline(deadline)?;
         let data_length = self.check_request_size(data.len())?;
         self.sequence = self.sequence.wrapping_add(1);
         let sequence = self.sequence;
@@ -299,27 +422,41 @@ impl Session {
         let bytes = encode(&outgoing, Direction::ClientToServer);
 
         for _ in 0..self.attempts {
-            self.socket
-                .send(&bytes)
+            check_deadline(deadline)?;
+            self.in_flight = true;
+            tokio::time::timeout_at(deadline, self.socket.send(&bytes))
                 .await
+                .map_err(|_| ClientError::OperationTimedOut)?
                 .map_err(|e| ClientError::Io(e.to_string()))?;
+            check_deadline(deadline)?;
 
-            if let Some(reply) = self.await_reply(sequence).await? {
+            if let Some(reply) = self.await_reply(sequence, deadline).await? {
+                check_deadline(deadline)?;
                 // The server's key is echoed on our next request.
                 self.key = reply.header.key;
+                self.in_flight = false;
+                check_deadline(deadline)?;
                 if reply.header.command == Command::Err.code() {
                     return Err(ClientError::Refused(trim_nul(&reply.data)));
                 }
                 return Ok(reply);
             }
         }
+        check_deadline(deadline)?;
         Err(ClientError::TimedOut)
     }
 
     /// Read until a reply with the expected sequence arrives, or the timeout
     /// expires. Mismatched replies are stale and are dropped.
-    async fn await_reply(&mut self, sequence: u16) -> Result<Option<Packet>, ClientError> {
-        let deadline = tokio::time::Instant::now() + self.timeout;
+    async fn await_reply(
+        &mut self,
+        sequence: u16,
+        operation: tokio::time::Instant,
+    ) -> Result<Option<Packet>, ClientError> {
+        let deadline = tokio::time::Instant::now()
+            .checked_add(self.timeout)
+            .unwrap_or(operation)
+            .min(operation);
         // One sentinel beyond the configured cap detects successful truncating
         // receives. At most 65536 bytes cover every ordinary UDP datagram even
         // when the caller supplies a larger policy value.
@@ -327,12 +464,17 @@ impl Session {
         let mut buffer = vec![0u8; capacity];
 
         loop {
+            check_deadline(operation)?;
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
                 return Ok(None);
             }
-            let read = match tokio::time::timeout(remaining, self.socket.recv(&mut buffer)).await {
-                Err(_) => return Ok(None),
+            let read = match tokio::time::timeout_at(deadline, self.socket.recv(&mut buffer)).await
+            {
+                Err(_) => {
+                    check_deadline(operation)?;
+                    return Ok(None);
+                }
                 Ok(Err(e)) if cfg!(windows) && e.raw_os_error() == Some(10040) => {
                     // WSAEMSGSIZE refuses a datagram larger than the receive
                     // buffer rather than returning its prefix.
@@ -345,6 +487,7 @@ impl Session {
                 Ok(Ok(read)) => read,
             };
 
+            check_deadline(operation)?;
             if read > self.limits.max_datagram_bytes {
                 return Err(ClientError::LimitExceeded {
                     what: "reply datagram",
@@ -378,8 +521,37 @@ impl Session {
                     max: self.limits.max_extra_bytes,
                 });
             }
-            return Ok(Some(decode(bytes, Direction::ServerToClient)?));
+            let packet = decode(bytes, Direction::ServerToClient)?;
+            check_deadline(operation)?;
+            return Ok(Some(packet));
         }
+    }
+}
+
+fn validate_operation_timeout(timeout: Duration) -> Result<(), ClientError> {
+    if std::time::Instant::now().checked_add(timeout).is_none() {
+        return Err(ClientError::Protocol(
+            "operation timeout overflows the clock".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn operation_deadline(timeout: Duration) -> Result<tokio::time::Instant, ClientError> {
+    validate_operation_timeout(timeout)?;
+    if timeout.is_zero() {
+        return Err(ClientError::OperationTimedOut);
+    }
+    tokio::time::Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| ClientError::Protocol("operation timeout overflows the clock".into()))
+}
+
+fn check_deadline(deadline: tokio::time::Instant) -> Result<(), ClientError> {
+    if tokio::time::Instant::now() >= deadline {
+        Err(ClientError::OperationTimedOut)
+    } else {
+        Ok(())
     }
 }
 
@@ -530,6 +702,10 @@ mod tests {
         assert_eq!(
             session.get_file_block("/x", 0).await.unwrap_err(),
             ClientError::TimedOut
+        );
+        assert_eq!(
+            session.version().await.unwrap_err(),
+            ClientError::SessionUnusable
         );
         task.await.unwrap();
     }
@@ -930,5 +1106,383 @@ mod limit_tests {
         .await;
         assert_eq!(session.get_file_block("/x", 0).await.unwrap(), b"ok");
         task.await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod operation_tests {
+    use super::*;
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+
+    async fn asked(server: &UdpSocket) -> (Packet, std::net::SocketAddr) {
+        let mut bytes = [0; 4096];
+        let (read, peer) =
+            tokio::time::timeout(Duration::from_secs(3), server.recv_from(&mut bytes))
+                .await
+                .expect("fixture request")
+                .unwrap();
+        (
+            decode(&bytes[..read], Direction::ClientToServer).unwrap(),
+            peer,
+        )
+    }
+
+    async fn answer(
+        server: &UdpSocket,
+        peer: std::net::SocketAddr,
+        request: &Packet,
+        command: Command,
+        key: u16,
+        data: Vec<u8>,
+    ) {
+        let packet = Packet {
+            header: Header {
+                command: command.code(),
+                key,
+                sequence: request.header.sequence,
+                data_length: u16::try_from(data.len()).unwrap(),
+                file_position: request.header.file_position,
+            },
+            data,
+            extra: vec![],
+        };
+        server
+            .send_to(&encode(&packet, Direction::ServerToClient), peer)
+            .await
+            .unwrap();
+    }
+
+    async fn session(server: &UdpSocket, timeout: Duration, limits: Limits) -> Session {
+        Session::connect_with_options(
+            "127.0.0.1",
+            Some(server.local_addr().unwrap().port()),
+            Options {
+                limits,
+                operation_timeout: timeout,
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    #[test]
+    fn zero_and_overflow_connect_policy_refuse_without_a_runtime_or_network() {
+        for (timeout, expected) in [
+            (Duration::ZERO, ClientError::OperationTimedOut),
+            (
+                Duration::MAX,
+                ClientError::Protocol("operation timeout overflows the clock".into()),
+            ),
+        ] {
+            let operation = Session::connect_with_options(
+                "must-not-resolve.invalid",
+                None,
+                Options {
+                    operation_timeout: timeout,
+                    ..Default::default()
+                },
+            );
+            let mut operation = pin!(operation);
+            match operation
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+            {
+                Poll::Ready(Err(error)) => assert_eq!(error, expected),
+                _ => panic!("invalid policy must refuse before runtime/timer/connection work"),
+            }
+        }
+        assert_eq!(
+            Options::default().operation_timeout,
+            Duration::from_secs(30)
+        );
+        assert_eq!(Options::default().limits, Limits::default());
+    }
+
+    #[tokio::test]
+    async fn full_file_and_directory_share_one_allowance_across_blocks() {
+        for command in [Command::GetFile, Command::GetDir] {
+            let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let mut session = session(&server, Duration::from_millis(500), Limits::default()).await;
+            let task = tokio::spawn(async move {
+                for index in 0..2 {
+                    let (request, peer) = asked(&server).await;
+                    assert_eq!(request.header.command, command.code());
+                    assert_eq!(request.header.key, index);
+                    let expected_offset = if command == Command::GetFile {
+                        u32::from(index) * MAX_PAYLOAD as u32
+                    } else {
+                        u32::from(index) * 12
+                    };
+                    assert_eq!(request.header.file_position, expected_offset);
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    let data = if command == Command::GetFile {
+                        vec![b'x'; MAX_PAYLOAD]
+                    } else {
+                        let mut entry = vec![0; 12];
+                        entry[8] = crate::wire::RDTYPE_FILE;
+                        entry[9] = b'x';
+                        entry
+                    };
+                    answer(&server, peer, &request, command, index + 1, data).await;
+                }
+                let mut bytes = [0; 64];
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(50), server.recv_from(&mut bytes))
+                        .await
+                        .is_err(),
+                    "expired operation must not send another request"
+                );
+            });
+            let error = if command == Command::GetFile {
+                session.get_file("/").await.unwrap_err()
+            } else {
+                session.list("/").await.unwrap_err()
+            };
+            assert_eq!(error, ClientError::OperationTimedOut);
+            task.await.unwrap(); // the delayed old-sequence reply is now queued
+            assert!(session.in_flight);
+            let sequence = session.sequence;
+            assert_eq!(
+                session.version().await.unwrap_err(),
+                ClientError::SessionUnusable
+            );
+            assert_eq!(session.sequence, sequence);
+            assert_eq!(
+                session.set_operation_timeout(Duration::from_secs(3)),
+                Err(ClientError::SessionUnusable)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn operation_allowance_clips_retries_without_restarting_the_budget() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut session = session(&server, Duration::from_millis(350), Limits::default()).await;
+        session.timeout = Duration::from_millis(200);
+        let task = tokio::spawn(async move {
+            let (first, _) = asked(&server).await;
+            let (second, _) = asked(&server).await;
+            assert_eq!(first, second, "retry keeps the same sequence/key/request");
+            let mut bytes = [0; 64];
+            assert!(
+                tokio::time::timeout(Duration::from_millis(250), server.recv_from(&mut bytes))
+                    .await
+                    .is_err(),
+                "a third retry would exceed the whole allowance"
+            );
+        });
+        assert_eq!(
+            session.version().await.unwrap_err(),
+            ClientError::OperationTimedOut
+        );
+        assert_eq!(session.attempts, 3);
+        assert_eq!(session.timeout, Duration::from_millis(200));
+        assert_eq!(
+            session.version().await.unwrap_err(),
+            ClientError::SessionUnusable
+        );
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn each_completed_operation_gets_a_fresh_allowance_after_idle_time() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut session = session(&server, Duration::from_millis(200), Limits::default()).await;
+        let task = tokio::spawn(async move {
+            let (first, peer) = asked(&server).await;
+            answer(
+                &server,
+                peer,
+                &first,
+                Command::Version,
+                41,
+                b"first".to_vec(),
+            )
+            .await;
+            let (second, peer) = asked(&server).await;
+            assert_eq!(second.header.key, 41);
+            assert_ne!(first.header.sequence, second.header.sequence);
+            // A queued old reply must not satisfy the next successful operation.
+            answer(
+                &server,
+                peer,
+                &first,
+                Command::Version,
+                41,
+                b"stale".to_vec(),
+            )
+            .await;
+            answer(
+                &server,
+                peer,
+                &second,
+                Command::Version,
+                42,
+                b"second".to_vec(),
+            )
+            .await;
+        });
+        assert_eq!(session.version().await.unwrap(), "first");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(session.version().await.unwrap(), "second");
+        assert_eq!(session.key, 42);
+        assert!(!session.in_flight);
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn caller_cancellation_retires_the_uncertain_key_session() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut session = session(&server, Duration::from_secs(2), Limits::default()).await;
+        let (seen, received) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let (sent, delivered) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let (request, peer) = asked(&server).await;
+            seen.send(()).unwrap();
+            released.await.unwrap();
+            answer(
+                &server,
+                peer,
+                &request,
+                Command::Version,
+                99,
+                b"late".to_vec(),
+            )
+            .await;
+            sent.send(()).unwrap();
+            let mut bytes = [0; 64];
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), server.recv_from(&mut bytes))
+                    .await
+                    .is_err()
+            );
+        });
+        let mut operation = Box::pin(session.version());
+        tokio::select! { result = &mut operation => panic!("unexpected completion: {result:?}"), _ = received => {} }
+        drop(operation);
+        release.send(()).unwrap();
+        delivered.await.unwrap();
+        assert_eq!(
+            session.version().await.unwrap_err(),
+            ClientError::SessionUnusable
+        );
+        assert_eq!(
+            session.set_operation_timeout(Duration::from_secs(3)),
+            Err(ClientError::SessionUnusable)
+        );
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn zero_budget_and_local_preflight_can_be_changed_without_reviving_interruption() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut session = session(
+            &server,
+            Duration::from_secs(1),
+            Limits {
+                max_request_bytes: HEADER_LEN + 3,
+                ..Default::default()
+            },
+        )
+        .await;
+        assert!(matches!(
+            session.get_file_block("/too-long", 0).await,
+            Err(ClientError::LimitExceeded { .. })
+        ));
+        session.set_operation_timeout(Duration::ZERO).unwrap();
+        assert_eq!(
+            session.version().await.unwrap_err(),
+            ClientError::OperationTimedOut
+        );
+        let mut bytes = [0; 64];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), server.recv_from(&mut bytes))
+                .await
+                .is_err()
+        );
+        assert!(matches!(
+            session.set_operation_timeout(Duration::MAX),
+            Err(ClientError::Protocol(_))
+        ));
+        assert_eq!(session.operation_timeout(), Duration::ZERO);
+        session
+            .set_operation_timeout(Duration::from_secs(1))
+            .unwrap();
+        let task = tokio::spawn(async move {
+            let (request, peer) = asked(&server).await;
+            answer(&server, peer, &request, Command::GetFile, 1, b"ok".to_vec()).await;
+        });
+        assert_eq!(session.get_file_block("/x", 0).await.unwrap(), b"ok");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn accepted_error_and_aggregate_refusal_keep_the_server_key_known() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut session = session(
+            &server,
+            Duration::from_secs(1),
+            Limits {
+                max_file_bytes: 0,
+                ..Default::default()
+            },
+        )
+        .await;
+        let task = tokio::spawn(async move {
+            let (first, peer) = asked(&server).await;
+            answer(&server, peer, &first, Command::Err, 10, b"refused".to_vec()).await;
+            let (second, peer) = asked(&server).await;
+            assert_eq!(second.header.key, 10);
+            answer(&server, peer, &second, Command::GetFile, 11, b"x".to_vec()).await;
+            let (third, peer) = asked(&server).await;
+            assert_eq!(third.header.key, 11);
+            answer(
+                &server,
+                peer,
+                &third,
+                Command::Version,
+                12,
+                b"healthy".to_vec(),
+            )
+            .await;
+        });
+        assert_eq!(
+            session.version().await.unwrap_err(),
+            ClientError::Refused("refused".into())
+        );
+        assert!(matches!(
+            session.get_file("/").await,
+            Err(ClientError::LimitExceeded {
+                what: "file bytes",
+                ..
+            })
+        ));
+        assert_eq!(session.version().await.unwrap(), "healthy");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn expired_absolute_budget_refuses_before_a_ready_inner_request() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut session = session(&server, Duration::from_secs(1), Limits::default()).await;
+        let deadline = tokio::time::Instant::now();
+        assert_eq!(
+            session
+                .request_until(Command::Version, &[], 0, deadline)
+                .await
+                .unwrap_err(),
+            ClientError::OperationTimedOut
+        );
+        assert!(!session.in_flight);
+        assert_eq!(session.sequence, 1);
+        let mut bytes = [0; 64];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), server.recv_from(&mut bytes))
+                .await
+                .is_err()
+        );
     }
 }

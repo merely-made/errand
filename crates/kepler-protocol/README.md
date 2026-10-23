@@ -57,8 +57,27 @@ instead of a successful prefix. Declared body lengths are checked before
 reading body bytes; short EOF is a protocol error, and the exact declared
 frame is read without consuming following bytes. Unknown lengths use a
 bounded overflow probe. Cache, timestamp, language, MIME and status data keep
-their existing representations. These are size/framing controls; callers
-still own deadlines and cancellation.
+their existing representations.
+
+## Operation deadlines
+
+`Options { limits, operation_timeout }` adds one caller-selected deadline.
+`fetch_with_options(url, last_cached, language, &options)` covers DNS, TCP,
+TLS, request writing, response headers and body under the same allowance.
+`exchange_with_options(stream, request, &options)` applies that allowance to
+an already-connected carrier. All existing helpers, including `_with_limits`,
+now choose a finite 30-second operation timeout. Size-limit defaults are unchanged.
+
+Pure request validation runs before any timer or network operation. A zero
+timeout returns `ClientError::TimedOut` immediately; a timeout outside the
+clock's range is a protocol error. Activity does not renew the allowance,
+and an always-ready carrier cannot return success after its deadline.
+
+A timed-out owned fetch drops its transport. After timeout or cancellation of
+an exchange using a borrowed carrier, discard that carrier: partial request
+or response bytes may already have crossed it. No draining or retry is implied.
+Valid client operations require a Tokio runtime with time enabled; grammar-only
+builds remain dependency-free. TLS certificate behavior remains unchanged.
 
 ## Known gaps
 

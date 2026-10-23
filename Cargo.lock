@@ -799,6 +799,7 @@ dependencies = [
 name = "scorpion-protocol"
 version = "0.1.0"
 dependencies = [
+ "rcgen",
  "rustls",
  "rustls-pki-types",
  "tokio",

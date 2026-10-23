@@ -14,6 +14,7 @@
 //! line.
 
 use std::io;
+use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -26,6 +27,10 @@ use crate::{DEFAULT_PORT, MAX_REQUEST_LINE};
 /// Why an exchange failed.
 #[derive(Debug)]
 pub enum ClientError {
+    /// The complete operation exceeded its caller-selected deadline.
+    TimedOut,
+    /// The requested duration cannot be represented by the monotonic clock.
+    InvalidTimeout,
     /// The socket failed.
     Io(io::Error),
     /// The server's status line could not be read.
@@ -51,6 +56,8 @@ pub enum ClientError {
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::TimedOut => write!(f, "scorpion: operation deadline expired"),
+            Self::InvalidTimeout => write!(f, "scorpion: operation timeout is too large"),
             Self::Io(error) => write!(f, "scorpion: {error}"),
             Self::Response(error) => write!(f, "scorpion: {error}"),
             Self::Url(detail) => write!(f, "scorpion: {detail}"),
@@ -128,8 +135,105 @@ impl Default for Limits {
     }
 }
 
+/// The convenience helpers' complete-operation allowance.
+pub const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Native size policy and a single budget for the complete operation.
+#[derive(Clone, Copy, Debug)]
+pub struct Options {
+    /// Existing native header and body limits.
+    pub limits: Limits,
+    /// Includes connection setup, writes, status and body reads.
+    pub operation_timeout: Duration,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            limits: Limits::default(),
+            operation_timeout: DEFAULT_OPERATION_TIMEOUT,
+        }
+    }
+}
+
+pub(crate) fn deadline_after(timeout: Duration) -> Result<tokio::time::Instant, ClientError> {
+    if timeout.is_zero() {
+        return Err(ClientError::TimedOut);
+    }
+    tokio::time::Instant::now()
+        .checked_add(timeout)
+        .ok_or(ClientError::InvalidTimeout)
+}
+
+pub(crate) async fn within_deadline<T>(
+    deadline: tokio::time::Instant,
+    operation: impl std::future::Future<Output = Result<T, ClientError>>,
+) -> Result<T, ClientError> {
+    if tokio::time::Instant::now() >= deadline {
+        return Err(ClientError::TimedOut);
+    }
+    let result = tokio::time::timeout_at(deadline, operation)
+        .await
+        .map_err(|_| ClientError::TimedOut)?;
+    // An always-ready carrier can complete while the timeout's inner future
+    // is being polled. It must not turn a late completion into success.
+    if tokio::time::Instant::now() >= deadline {
+        return Err(ClientError::TimedOut);
+    }
+    result
+}
+
 /// Run one request over an already-open stream.
 pub async fn exchange<S>(
+    stream: &mut S,
+    request: &Request,
+    limits: Limits,
+) -> Result<Response, ClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    exchange_with_options(
+        stream,
+        request,
+        Options {
+            limits,
+            ..Options::default()
+        },
+    )
+    .await
+}
+
+/// Exchange using one caller-selected operation budget.
+///
+/// Discard a borrowed carrier after timeout or cancellation: it may contain a
+/// partially written request or unread response. This is not an idle timeout.
+pub async fn exchange_with_options<S>(
+    stream: &mut S,
+    request: &Request,
+    options: Options,
+) -> Result<Response, ClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let deadline = deadline_after(options.operation_timeout)?;
+    exchange_until(stream, request, options.limits, deadline).await
+}
+
+/// Exchange before an absolute caller deadline, shared with other session phases.
+/// Discard the carrier after timeout or cancellation.
+pub async fn exchange_until<S>(
+    stream: &mut S,
+    request: &Request,
+    limits: Limits,
+    deadline: tokio::time::Instant,
+) -> Result<Response, ClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    within_deadline(deadline, exchange_inner(stream, request, limits)).await
+}
+
+async fn exchange_inner<S>(
     stream: &mut S,
     request: &Request,
     limits: Limits,
@@ -143,7 +247,7 @@ where
         crate::request::Parameter::Range(range) => Some(*range),
         _ => None,
     };
-    read_response(stream, limits, range).await
+    read_response_inner(stream, limits, range).await
 }
 
 /// Read one status line and, if the class carries one, its body.
@@ -154,6 +258,57 @@ where
 /// would block waiting for data the server was never going to send. Pass
 /// `None` when the request carried no range.
 pub async fn read_response<S>(
+    stream: &mut S,
+    limits: Limits,
+    requested_range: Option<crate::request::Range>,
+) -> Result<Response, ClientError>
+where
+    S: AsyncRead + Unpin,
+{
+    read_response_with_options(
+        stream,
+        Options {
+            limits,
+            ..Options::default()
+        },
+        requested_range,
+    )
+    .await
+}
+
+/// Read a framed response within one operation budget. Discard the carrier
+/// after timeout or cancellation, rather than reusing a partial frame.
+pub async fn read_response_with_options<S>(
+    stream: &mut S,
+    options: Options,
+    requested_range: Option<crate::request::Range>,
+) -> Result<Response, ClientError>
+where
+    S: AsyncRead + Unpin,
+{
+    let deadline = deadline_after(options.operation_timeout)?;
+    read_response_until(stream, options.limits, requested_range, deadline).await
+}
+
+/// Read before the same absolute deadline used for connection setup or an
+/// earlier interactive response. This never renews the caller's allowance.
+pub async fn read_response_until<S>(
+    stream: &mut S,
+    limits: Limits,
+    requested_range: Option<crate::request::Range>,
+    deadline: tokio::time::Instant,
+) -> Result<Response, ClientError>
+where
+    S: AsyncRead + Unpin,
+{
+    within_deadline(
+        deadline,
+        read_response_inner(stream, limits, requested_range),
+    )
+    .await
+}
+
+async fn read_response_inner<S>(
     stream: &mut S,
     limits: Limits,
     requested_range: Option<crate::request::Range>,
@@ -289,10 +444,44 @@ where
 /// For `scorpions://`, use [`crate::tls`] instead: this sends the request in
 /// the clear, and a client must never treat the two schemes as equivalent.
 pub async fn fetch(request: &Request, limits: Limits) -> Result<Response, ClientError> {
-    let (host, port) = authority(&request.url)?;
-    let mut stream = TcpStream::connect((host.as_str(), port)).await?;
-    exchange(&mut stream, request, limits).await
+    fetch_with_options(
+        request,
+        Options {
+            limits,
+            ..Options::default()
+        },
+    )
+    .await
 }
+
+/// Dial TCP and exchange under one deadline, including name resolution and all
+/// response bytes. The owned socket is dropped on timeout or cancellation.
+pub async fn fetch_with_options(
+    request: &Request,
+    options: Options,
+) -> Result<Response, ClientError> {
+    let (host, port) = authority(&request.url)?;
+    if !request
+        .url
+        .split(':')
+        .next()
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case(crate::SCHEME))
+    {
+        return Err(ClientError::Url(
+            "plain TCP fetch requires scorpion://; use the TLS carrier for scorpions://".into(),
+        ));
+    }
+    let deadline = deadline_after(options.operation_timeout)?;
+    within_deadline(deadline, async {
+        let mut stream = TcpStream::connect((host.as_str(), port)).await?;
+        exchange_inner(&mut stream, request, options.limits).await
+    })
+    .await
+}
+
+#[cfg(test)]
+#[path = "deadline_tests.rs"]
+mod deadline_tests;
 
 /// The host and port a URL names, defaulting to [`DEFAULT_PORT`].
 pub fn authority(url: &str) -> Result<(String, u16), ClientError> {

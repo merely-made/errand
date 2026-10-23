@@ -24,9 +24,12 @@
 //! `552 no match` is an answer.
 //!
 
+use std::time::Duration;
+
 use tokio::io::AsyncRead;
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
+use tokio::time::{Instant, error::Elapsed, timeout_at};
 
 use crate::wire::{
     self, DEFAULT_PORT, Database, Definition, MAX_LINE, Match, Status, parse_definition_header,
@@ -39,6 +42,8 @@ pub enum ClientError {
     Io(String),
     /// The server said something the grammar does not allow.
     Protocol(String),
+    /// The whole connection/banner or command operation exhausted its budget.
+    TimedOut,
     /// The server refused, with its own code and message.
     Refused {
         code: u16,
@@ -52,6 +57,7 @@ impl std::fmt::Display for ClientError {
             Self::Connect(m) => write!(f, "connect: {m}"),
             Self::Io(m) => write!(f, "io: {m}"),
             Self::Protocol(m) => write!(f, "protocol: {m}"),
+            Self::TimedOut => write!(f, "operation timed out"),
             Self::Refused { code, text } => write!(f, "server refused: {code} {text}"),
         }
     }
@@ -102,6 +108,61 @@ impl Limits {
     }
 }
 
+/// Session byte limits and a fresh whole-operation allowance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Options {
+    pub limits: Limits,
+    /// Covers connection plus banner, then independently each complete command.
+    /// Idle time between commands does not consume this allowance.
+    pub operation_timeout: Duration,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            limits: Limits::default(),
+            operation_timeout: Duration::from_secs(30),
+        }
+    }
+}
+
+impl Options {
+    fn deadline(self) -> Result<Instant, ClientError> {
+        self.limits.validate()?;
+        operation_deadline(self.operation_timeout)
+    }
+}
+
+fn operation_deadline(timeout: Duration) -> Result<Instant, ClientError> {
+    if timeout.is_zero() {
+        return Err(ClientError::TimedOut);
+    }
+    if std::time::Instant::now().checked_add(timeout).is_none() {
+        return Err(ClientError::Protocol(
+            "operation timeout is unrepresentable".into(),
+        ));
+    }
+    Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| ClientError::Protocol("operation timeout is unrepresentable".into()))
+}
+
+fn check_deadline(deadline: Instant) -> Result<(), ClientError> {
+    if Instant::now() >= deadline {
+        Err(ClientError::TimedOut)
+    } else {
+        Ok(())
+    }
+}
+
+fn timed_result<T>(
+    deadline: Instant,
+    result: Result<Result<T, ClientError>, Elapsed>,
+) -> Result<T, ClientError> {
+    check_deadline(deadline)?;
+    result.map_err(|_| ClientError::TimedOut)?
+}
+
 #[derive(Default)]
 struct Budget {
     bytes: usize,
@@ -115,6 +176,8 @@ pub struct Session<S> {
     limits: Limits,
     budget: Budget,
     unusable: bool,
+    operation_timeout: Duration,
+    deadline: Instant,
 }
 
 impl Session<TcpStream> {
@@ -123,18 +186,40 @@ impl Session<TcpStream> {
         Self::connect_with_limits(host, port, Limits::default()).await
     }
 
-    /// Connect using explicit byte and line budgets. No deadline is imposed.
+    /// Connect using explicit byte/line budgets and the default 30-second deadline.
     pub async fn connect_with_limits(
         host: &str,
         port: Option<u16>,
         limits: Limits,
     ) -> Result<Self, ClientError> {
-        limits.validate()?;
+        Self::connect_with_options(
+            host,
+            port,
+            Options {
+                limits,
+                ..Options::default()
+            },
+        )
+        .await
+    }
+
+    /// One deadline covers DNS resolution, TCP connection and the entire banner.
+    pub async fn connect_with_options(
+        host: &str,
+        port: Option<u16>,
+        options: Options,
+    ) -> Result<Self, ClientError> {
+        let deadline = options.deadline()?;
         let port = port.unwrap_or(DEFAULT_PORT);
-        let stream = TcpStream::connect((host, port))
-            .await
-            .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
-        Self::over_with_limits(stream, limits).await
+        let result = timeout_at(deadline, async {
+            check_deadline(deadline)?;
+            let stream = TcpStream::connect((host, port))
+                .await
+                .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
+            Self::over_before_deadline(stream, options, deadline).await
+        })
+        .await;
+        timed_result(deadline, result)
     }
 }
 
@@ -154,11 +239,43 @@ where
     ///
     /// A receive failure leaves the session unusable: a partial response is
     /// never drained without a budget. Request preflight failures do not do so.
-    /// Hosts own whole-operation deadlines and cancellation.
+    /// Uses the default 30-second deadline for the banner and each command.
     pub async fn over_with_limits(stream: S, limits: Limits) -> Result<Self, ClientError> {
-        limits.validate()?;
+        Self::over_with_options(
+            stream,
+            Options {
+                limits,
+                ..Options::default()
+            },
+        )
+        .await
+    }
+
+    /// Start a supplied-carrier session with explicit byte and time budgets.
+    /// Carrier establishment before this call remains the host's responsibility.
+    pub async fn over_with_options(stream: S, options: Options) -> Result<Self, ClientError> {
+        let deadline = options.deadline()?;
+        let result = timeout_at(
+            deadline,
+            Self::over_before_deadline(stream, options, deadline),
+        )
+        .await;
+        timed_result(deadline, result)
+    }
+
+    async fn over_before_deadline(
+        stream: S,
+        options: Options,
+        deadline: Instant,
+    ) -> Result<Self, ClientError> {
         let mut stream = BufReader::new(stream);
-        let banner = read_status(&mut stream, limits, &mut Budget::default()).await?;
+        let banner = read_status(
+            &mut stream,
+            options.limits,
+            &mut Budget::default(),
+            deadline,
+        )
+        .await?;
         if banner.code != wire::BANNER {
             return Err(ClientError::Protocol(format!(
                 "expected a 220 banner, got {} {}",
@@ -168,9 +285,11 @@ where
         Ok(Self {
             stream,
             banner,
-            limits,
+            limits: options.limits,
             budget: Budget::default(),
             unusable: false,
+            operation_timeout: options.operation_timeout,
+            deadline,
         })
     }
 
@@ -184,7 +303,13 @@ where
     /// An empty list is a legitimate answer (`554 no databases present`), not
     /// an error.
     pub async fn databases(&mut self) -> Result<Vec<Database>, ClientError> {
-        let status = self.command("SHOW DB").await?;
+        let deadline = self.begin_operation("SHOW DB")?;
+        let result = timeout_at(deadline, self.databases_inner()).await;
+        self.finish_operation(deadline, result)
+    }
+
+    async fn databases_inner(&mut self) -> Result<Vec<Database>, ClientError> {
+        let status = self.send_command("SHOW DB").await?;
         match status.code {
             wire::DATABASES_FOLLOW => {
                 let lines = self.read_text_block().await?;
@@ -199,7 +324,13 @@ where
 
     /// `SHOW STRAT`: the matching strategies this server supports.
     pub async fn strategies(&mut self) -> Result<Vec<Database>, ClientError> {
-        let status = self.command("SHOW STRAT").await?;
+        let deadline = self.begin_operation("SHOW STRAT")?;
+        let result = timeout_at(deadline, self.strategies_inner()).await;
+        self.finish_operation(deadline, result)
+    }
+
+    async fn strategies_inner(&mut self) -> Result<Vec<Database>, ClientError> {
+        let status = self.send_command("SHOW STRAT").await?;
         match status.code {
             wire::STRATEGIES_FOLLOW => {
                 let lines = self.read_text_block().await?;
@@ -223,7 +354,13 @@ where
         word: &str,
     ) -> Result<Vec<Definition>, ClientError> {
         let line = self.parameter_command("DEFINE", &[database, word])?;
-        let status = self.command(&line).await?;
+        let deadline = self.begin_operation(&line)?;
+        let result = timeout_at(deadline, self.define_inner(&line)).await;
+        self.finish_operation(deadline, result)
+    }
+
+    async fn define_inner(&mut self, line: &str) -> Result<Vec<Definition>, ClientError> {
+        let status = self.send_command(line).await?;
         match status.code {
             wire::DEFINITIONS_FOLLOW => {}
             wire::NO_MATCH => return Ok(Vec::new()),
@@ -266,7 +403,13 @@ where
         word: &str,
     ) -> Result<Vec<Match>, ClientError> {
         let line = self.parameter_command("MATCH", &[database, strategy, word])?;
-        let status = self.command(&line).await?;
+        let deadline = self.begin_operation(&line)?;
+        let result = timeout_at(deadline, self.matches_inner(&line)).await;
+        self.finish_operation(deadline, result)
+    }
+
+    async fn matches_inner(&mut self, line: &str) -> Result<Vec<Match>, ClientError> {
+        let status = self.send_command(line).await?;
         match status.code {
             wire::MATCHES_FOLLOW => {
                 let lines = self.read_text_block().await?;
@@ -282,17 +425,21 @@ where
     /// `CLIENT text`: announce who is calling. Servers log it; none require it.
     pub async fn announce(&mut self, text: &str) -> Result<(), ClientError> {
         self.check_command_parts(&["CLIENT ", text])?;
-        let status = self.command(&format!("CLIENT {text}")).await?;
-        if status.is_success() {
-            Ok(())
-        } else {
-            Err(refused(status))
-        }
+        let line = format!("CLIENT {text}");
+        let deadline = self.begin_operation(&line)?;
+        let result = timeout_at(deadline, self.success_command(&line)).await;
+        self.finish_operation(deadline, result)
     }
 
     /// `QUIT`, consuming the session.
     pub async fn quit(mut self) -> Result<(), ClientError> {
-        let status = self.command("QUIT").await?;
+        let deadline = self.begin_operation("QUIT")?;
+        let result = timeout_at(deadline, self.success_command("QUIT")).await;
+        self.finish_operation(deadline, result)
+    }
+
+    async fn success_command(&mut self, line: &str) -> Result<(), ClientError> {
+        let status = self.send_command(line).await?;
         if status.is_success() {
             Ok(())
         } else {
@@ -305,13 +452,49 @@ where
     /// This low-level method does not consume text blocks or later statuses.
     /// Use the high-level methods for complete, jointly budgeted responses.
     pub async fn command(&mut self, line: &str) -> Result<Status, ClientError> {
+        let deadline = self.begin_operation(line)?;
+        let result = timeout_at(deadline, self.send_command(line)).await;
+        self.finish_operation(deadline, result)
+    }
+
+    fn begin_operation(&mut self, line: &str) -> Result<Instant, ClientError> {
         self.check_command_parts(&[line])?;
         if self.unusable {
             return Err(ClientError::Protocol(
-                "session is unusable after a receive or write failure".into(),
+                "session is unusable after an incomplete or failed operation".into(),
             ));
         }
+        let deadline = operation_deadline(self.operation_timeout)?;
+        self.deadline = deadline;
+        // Set before the first I/O await. Dropping a polled operation future
+        // leaves this flag set even though no error return executes.
+        self.unusable = true;
         self.budget = Budget::default();
+        Ok(deadline)
+    }
+
+    fn finish_operation<T>(
+        &mut self,
+        deadline: Instant,
+        result: Result<Result<T, ClientError>, Elapsed>,
+    ) -> Result<T, ClientError> {
+        let result = timed_result(deadline, result);
+        if result.is_ok()
+            || matches!(
+                &result,
+                Err(ClientError::Refused {
+                    code: 400..=599,
+                    ..
+                })
+            )
+        {
+            self.unusable = false;
+        }
+        result
+    }
+
+    async fn send_command(&mut self, line: &str) -> Result<Status, ClientError> {
+        check_deadline(self.deadline)?;
         let write = async {
             self.stream.get_mut().write_all(line.as_bytes()).await?;
             self.stream.get_mut().write_all(b"\r\n").await
@@ -363,7 +546,13 @@ where
     }
 
     async fn read_status(&mut self) -> Result<Status, ClientError> {
-        let result = read_status(&mut self.stream, self.limits, &mut self.budget).await;
+        let result = read_status(
+            &mut self.stream,
+            self.limits,
+            &mut self.budget,
+            self.deadline,
+        )
+        .await;
         if result.is_err() {
             self.unusable = true;
         }
@@ -374,7 +563,13 @@ where
     async fn read_text_block(&mut self) -> Result<Vec<String>, ClientError> {
         let mut lines = Vec::new();
         loop {
-            let result = read_line(&mut self.stream, self.limits, &mut self.budget).await;
+            let result = read_line(
+                &mut self.stream,
+                self.limits,
+                &mut self.budget,
+                self.deadline,
+            )
+            .await;
             if result.is_err() {
                 self.unusable = true;
             }
@@ -428,6 +623,7 @@ async fn read_line<S>(
     stream: &mut BufReader<S>,
     limits: Limits,
     budget: &mut Budget,
+    deadline: Instant,
 ) -> Result<String, ClientError>
 where
     S: AsyncRead + Unpin,
@@ -437,6 +633,7 @@ where
     }
     let mut line = Vec::new();
     loop {
+        check_deadline(deadline)?;
         let available = stream
             .fill_buf()
             .await
@@ -472,11 +669,12 @@ async fn read_status<S>(
     stream: &mut BufReader<S>,
     limits: Limits,
     budget: &mut Budget,
+    deadline: Instant,
 ) -> Result<Status, ClientError>
 where
     S: AsyncRead + Unpin,
 {
-    let line = read_line(stream, limits, budget).await?;
+    let line = read_line(stream, limits, budget, deadline).await?;
     wire::parse_status(&line)
         .ok_or_else(|| ClientError::Protocol(format!("not a status line: {line:?}")))
 }
@@ -484,6 +682,10 @@ where
 #[cfg(test)]
 #[path = "client_limits_tests.rs"]
 mod limits_tests;
+
+#[cfg(test)]
+#[path = "client_deadline_tests.rs"]
+mod deadline_tests;
 
 #[cfg(test)]
 mod tests {

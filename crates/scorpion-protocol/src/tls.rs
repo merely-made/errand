@@ -40,7 +40,9 @@ use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
-use crate::client::{ClientError, authority};
+use crate::client::{
+    ClientError, DEFAULT_OPERATION_TIMEOUT, authority, deadline_after, within_deadline,
+};
 
 /// A `rustls` client config with the specification's transport requirements
 /// applied, and `verifier` deciding trust.
@@ -63,15 +65,32 @@ pub async fn connect_with(
     url: &str,
     verifier: Arc<dyn ServerCertVerifier>,
 ) -> Result<TlsStream<TcpStream>, ClientError> {
+    // Resolve malformed caller input before creating a timer.
+    authority(url)?;
+    let deadline = deadline_after(DEFAULT_OPERATION_TIMEOUT)?;
+    connect_with_deadline(url, verifier, deadline).await
+}
+
+/// Open TCP/TLS before an absolute caller deadline. Pass the same deadline to
+/// `client::exchange_until` and `client::read_response_until` to bound a whole
+/// interactive operation without renewing its allowance after the handshake.
+pub async fn connect_with_deadline(
+    url: &str,
+    verifier: Arc<dyn ServerCertVerifier>,
+    deadline: tokio::time::Instant,
+) -> Result<TlsStream<TcpStream>, ClientError> {
     let (host, port) = authority(url)?;
-    let stream = TcpStream::connect((host.as_str(), port)).await?;
     let server_name = ServerName::try_from(host.clone())
         .map_err(|_| ClientError::Url(format!("{host} is not a valid server name")))?;
     let connector = TlsConnector::from(Arc::new(base_config(verifier)));
-    connector
-        .connect(server_name, stream)
-        .await
-        .map_err(ClientError::Io)
+    within_deadline(deadline, async {
+        let stream = TcpStream::connect((host.as_str(), port)).await?;
+        connector
+            .connect(server_name, stream)
+            .await
+            .map_err(ClientError::Io)
+    })
+    .await
 }
 
 /// A verifier that accepts any server certificate.
