@@ -1,0 +1,268 @@
+{
+  "schema": "session-deadlines-qualification-v1",
+  "owner": "errand native protocol crates",
+  "date": "2026-10-23",
+  "qualified_source": "c0ef44b13b375636e372bdc69e207413db67d143",
+  "qualified_tree": "d9a993bbf97493621934648853cf865dd2be2cef",
+  "crate_trees": {
+    "dict-protocol": "ccb79daed60c9cf695362be7e4a84b2837cb30e2",
+    "fsp-protocol": "05517056e19fbbd5c341cbb175c085512975a6cb",
+    "kepler-protocol": "17ef8e31ceea54cb7e820ce0c29bdf38a99aebc7",
+    "scorpion-protocol": "d0496c5fc575265df2080980cde5d47d283776b4",
+    "text-protocol": "2e200c352bbb8e089c1bdceb286dfa9c966d94aa"
+  },
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "git_lock_blob": "aeee95e98a7f49618dd4be4316ea477a112a2268",
+  "native_source_sha256": {
+    "crates/dict-protocol/Cargo.toml": "3c4b408e0fb777cd826e68d5437d2ba1f584a1b76f3d4f533006af59698d9a4a",
+    "crates/dict-protocol/src/client.rs": "82cfdf4feb0cf8554d0b95d28ddf9e2b4d7cdb4f307c2e807cd2df253a393289",
+    "crates/dict-protocol/src/client_deadline_tests.rs": "3a40d24b99a352d438d909cac579181e6acb3693ecc26059908badf5434b1454",
+    "crates/dict-protocol/src/lib.rs": "f989c32ff03d5f07da3ebcc2af49055f37d944fcdd7eab11cea8ca458514f4e4",
+    "crates/fsp-protocol/Cargo.toml": "6de374305e646e2eb842e82c9d7014758b64a204d26c90eb148929d730d3fb55",
+    "crates/fsp-protocol/src/client.rs": "7a30e74ae5f07e2a92063c09cc42795fb44a43592f8db0f3365b6676b813e29e",
+    "crates/fsp-protocol/src/lib.rs": "1ab37ea82f4e3ba807094e775a49fb092d3174e0e1e51ee0aadcedadab38307f",
+    "crates/kepler-protocol/Cargo.toml": "4c43861f9e2b27d0a92149472e203df9b90b04bdf63d39db5ae457a6fb17f2ff",
+    "crates/kepler-protocol/src/client.rs": "0e059f4eb01f1a17ecf577cd1b7cddc61cf5eb1be68dbc1d4d03d81ddd757234",
+    "crates/kepler-protocol/src/deadline_tests.rs": "8817dea988948ddfc7108107da01ad1c84a66b129de72e74ffc9df1c13d7554d",
+    "crates/kepler-protocol/src/lib.rs": "0733a5e5de1c29bd4cd2461cffce123f7d136b81d132fef15d6b652a44c6fe8e",
+    "crates/kepler-protocol/src/limits_tests.rs": "fe2b1ce5095e4b02946a9697b95dd07b99bf3211e1b7a760a4594d8f654ea956",
+    "crates/kepler-protocol/src/tls.rs": "67f4a9fa8961e3049c4540f90c3664e33b35a8acf83ea2b1db6e7a9e68767bd6",
+    "crates/scorpion-protocol/Cargo.toml": "07bf8ac38cd275d45db8323e257b7ec35eb4e26862bdf328597807310b8d8b4f",
+    "crates/scorpion-protocol/src/client.rs": "36730b0fb754a940cbf3c41ccbd7f1b8c552362a95b2705df6c20892d2d1ff63",
+    "crates/scorpion-protocol/src/deadline_tests.rs": "59383182d0531e4a816128ca90bb36d941bf2ec2bc701f7b83ed4bb2a64dc773",
+    "crates/scorpion-protocol/src/tls.rs": "e710aeaaa662b2f7104d16455bc69d27ff529acdfd9c66bb39fb3f6454926a8a",
+    "crates/text-protocol/Cargo.toml": "cb5cd49373d48a075d0638b9373286b51f51bea1df4f5a9e27e7fc09fd5d1673",
+    "crates/text-protocol/src/deadline_tests.rs": "d99435d1c11e91f8bf6f957029870b08bdb7008fc00a97d142ee2252625f9ed6",
+    "crates/text-protocol/src/lib.rs": "55c3ddbd94d6c75e181b2de2d47395a1c66cb6440b3ccf636cef9a481a295136",
+    "crates/text-protocol/src/limits_tests.rs": "1d32b488f7b14a46dfeb823fc82991fd133b318139a3b68ea9ed387febffc711"
+  },
+  "toolchain": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo 1.99.1 (5f94df478 2026-08-27)"
+  ],
+  "target": "C:\\t\\cargo-targets\\smolweb",
+  "build_dir": "C:\\t\\cargo-targets\\smolweb\\build",
+  "lock_delta": "Only the already-locked rcgen0.13 dev-dependency edge was added to scorpion-protocol. Other manifest changes enable Tokio time/test-util or dev sync features. Registry package versions and checksums unchanged.",
+  "commands": [
+    {
+      "command": "cargo test --locked --offline -p dict-protocol -p fsp-protocol -p kepler-protocol -p scorpion-protocol -p text-protocol --all-features --quiet",
+      "exit_code": 0,
+      "unit_passed": 211,
+      "integration_passed": 10,
+      "doctest_passed": 8,
+      "failed": 0,
+      "ignored": 0,
+      "by_crate": {
+        "dict-protocol": {
+          "unit": 43,
+          "doc": 1
+        },
+        "fsp-protocol": {
+          "unit": 35,
+          "doc": 2
+        },
+        "kepler-protocol": {
+          "unit": 40,
+          "doc": 3
+        },
+        "scorpion-protocol": {
+          "unit": 68,
+          "integration": 10,
+          "doc": 1
+        },
+        "text-protocol": {
+          "unit": 25,
+          "doc": 1
+        }
+      }
+    },
+    {
+      "command_template": "cargo check --locked --offline -p <crate> --no-default-features [--features client|tls|server] --quiet",
+      "scope": "Fourteen independent Cargo invocations, one crate/feature graph each. Grammar means no feature flag.",
+      "results": [
+        {
+          "crate": "dict-protocol",
+          "features": "grammar",
+          "exit_code": 0
+        },
+        {
+          "crate": "dict-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "fsp-protocol",
+          "features": "grammar",
+          "exit_code": 0
+        },
+        {
+          "crate": "fsp-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "kepler-protocol",
+          "features": "grammar",
+          "exit_code": 0
+        },
+        {
+          "crate": "kepler-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "scorpion-protocol",
+          "features": "grammar",
+          "exit_code": 0
+        },
+        {
+          "crate": "scorpion-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "text-protocol",
+          "features": "grammar",
+          "exit_code": 0
+        },
+        {
+          "crate": "text-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "kepler-protocol",
+          "features": "tls",
+          "exit_code": 0
+        },
+        {
+          "crate": "scorpion-protocol",
+          "features": "tls",
+          "exit_code": 0
+        },
+        {
+          "crate": "text-protocol",
+          "features": "tls",
+          "exit_code": 0
+        },
+        {
+          "crate": "scorpion-protocol",
+          "features": "server",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "command": "cargo clippy --locked --offline -p dict-protocol -p fsp-protocol -p kepler-protocol -p scorpion-protocol -p text-protocol --all-features --all-targets --no-deps --message-format short -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --cached --check",
+      "exit_code": 0
+    }
+  ],
+  "additional_owner_gates": [
+    {
+      "crate": "dict-protocol",
+      "command": "cargo test -p dict-protocol --no-default-features --locked --offline --quiet",
+      "unit_passed": 11,
+      "doc_passed": 0,
+      "exit_code": 0
+    },
+    {
+      "crates": [
+        "kepler-protocol",
+        "text-protocol"
+      ],
+      "command": "cargo test -p kepler-protocol -p text-protocol --locked --offline --message-format=json --no-default-features",
+      "unit_passed": 21,
+      "doc_passed": 4,
+      "exit_code": 0
+    },
+    {
+      "crates": [
+        "kepler-protocol",
+        "text-protocol"
+      ],
+      "command": "cargo test -p kepler-protocol -p text-protocol --locked --offline --message-format=json --no-default-features --features client",
+      "unit_passed": 59,
+      "doc_passed": 4,
+      "exit_code": 0
+    }
+  ],
+  "deadline_policy": {
+    "options": "Native Options { limits, operation_timeout }; default30seconds. Byte-only Limits structs retain their existing fields/defaults.",
+    "scope": "One absolute monotonic deadline covers a complete operation, including setup and all nested stages. New commands receive fresh allowances; idle lifetime is not charged.",
+    "dict": "Connect covers DNS/TCP/banner. High-level commands share one deadline across writes, all definitions/text, terminators and final status. Pre-I/O unusable flag remains set after timeout or externally dropped polled future; no further command writes.",
+    "fsp": "Connect covers UDP setup/name resolution. Each file/list/request budget spans all sends, retries and blocks. Existing attempts3 and per-reply timeout1second preserved. OperationTimedOut is distinct from existing retry TimedOut. Interrupted or retry-exhausted unanswered requests retire uncertain-key sessions; accepted CC_ERR and post-reply aggregate refusal preserve known-key sessions.",
+    "kepler_text": "One fetch allowance covers DNS/TCP/TLS/write/header/body via untimed inner helpers. Supplied-carrier helpers are also bounded. Owned fetch drops transport after timeout/cancellation; borrowed carriers must be discarded by callers.",
+    "scorpion": "Options cover TCP fetch or a framed exchange/read. Absolute exchange_until/read_response_until and TLS connect_with_deadline allow one caller deadline across setup and multiple native frames. Borrowed carrier interruption requires caller discard; TLS verifier and resumption policy unchanged.",
+    "preflight": "Invalid caller input, zero allowance and unrepresentable durations refuse before timer/network when applicable. Zero gives timeout; overflow is an invalid policy error. Pure preflight remains pollable without a Tokio runtime.",
+    "ready_carriers": "Explicit absolute-deadline checks prevent always-ready completion from succeeding after the deadline."
+  },
+  "new_deadline_controls": {
+    "total": 47,
+    "by_crate": {
+      "dict-protocol": 11,
+      "fsp-protocol": 8,
+      "kepler-protocol": 9,
+      "scorpion-protocol": 10,
+      "text-protocol": 9
+    }
+  },
+  "transport_evidence": {
+    "paused_or_supplied": [
+      "DICT stalled/dripping banners, cumulative DEFINE/trailer budget, partial write/read external cancellation, unpolled drop, local preflight, fresh commands across idle",
+      "Kepler/Text stalled writes, headers and bodies; finite default30seconds; staged and continuous progress without renewal; late ready completion",
+      "Scorpion stalled write/header, body progress without renewal, same absolute deadline across two responses, late ready completion, pure zero/overflow/expired input"
+    ],
+    "actual_tcp": [
+      "DICT stalled banner and owned socket close",
+      "Kepler/Text stalled reply and owned socket close",
+      "Scorpion stalled reply and owned socket close, successful native metadata/body"
+    ],
+    "actual_udp": [
+      "FSP cumulative file and directory blocks, retries inside one budget, idle/fresh operations, cancellation barriers, queued stale responses and retired sessions, known-key local/server refusals"
+    ],
+    "actual_tls": [
+      "Kepler/Text stalled handshake plus combined handshake/body budget",
+      "Scorpion stalled handshake, then successful TLS setup plus two framed responses under one absolute deadline"
+    ],
+    "scope": "Localhost fixtures qualify native adapters. DNS/connect awaits are structurally inside the same timeout; external resolver failures and remote networks were not separately exercised."
+  },
+  "preserved": [
+    "Native size budgets, request ceilings, status/MIME/cache/language metadata and frame boundaries.",
+    "Existing FSP per-reply retries and native data/extra areas.",
+    "Scorpion caller-owned TLS trust and resumption policy.",
+    "Existing site snapshot format and browser/actor authority.",
+    "Mail crate source and its existing per-step deadlines."
+  ],
+  "adjacent_fix": "Scorpion plaintext fetch now refuses secure/foreign schemes before timer/contact, matching its existing documented clear/TLS distinction.",
+  "consumer_inventory": {
+    "rust_callsite_search": [
+      "mere",
+      "turnstone",
+      "knot-editor",
+      "genet"
+    ],
+    "active_native_clients_found": 0,
+    "delivery": "Supplier-native only; patch plumbing does not trigger product repins or new Errand routes."
+  },
+  "unqualified": [
+    "Misfin whole-send deadline and mail cancellation policy (separate phase7).",
+    "Scorpion send/interactive session driver; this slice bounds existing framed carrier APIs.",
+    "Automatic recovery/reuse of interrupted borrowed carriers.",
+    "Preemption of blocking custom carrier polls or synchronous work; deadlines are cooperative.",
+    "External servers/resolvers, headed UI, physical radio, cross-machine and independent readers.",
+    "Other Rust versions/platforms beyond the recorded toolchain/native Windows run."
+  ],
+  "hygiene": {
+    "retained_byte_cap": 100000000,
+    "new_isolated_targets": [],
+    "new_cargo_homes": [],
+    "new_worktrees": [],
+    "retained_full_logs": [],
+    "prior_receipts": "Preserved without overwrite."
+  },
+  "receipt_byte_convention": "UTF-8 LF JSON with -text attribute; Git/native receipt bytes identical. Git tree/blob IDs identify normalized source; SHA256 values identify native source/lock bytes. The staged tree tested by final gates equals the committed qualified_tree."
+}

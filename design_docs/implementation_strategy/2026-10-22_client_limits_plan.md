@@ -1,9 +1,9 @@
 # Client receive limits
 
-**Status (2026-10-23):** phases 1 to 5 landed and qualified: routed clients,
+**Status (2026-10-23):** phases 1 to 6 landed and qualified: routed clients,
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
-size and framing limits. Session operation deadlines are in progress in phase 6;
-mail deadlines remain separately queued in phase 7.
+size and framing limits, plus native session operation deadlines. Mail deadlines
+remain separately queued in phase 7.
 
 ## Ownership and scope
 
@@ -156,6 +156,21 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: session source `c0ef44b1` completes phase 6. The combined gate
+  passes 211 unit tests, 10 integration tests and eight doctests, with 47 new
+  deadline controls. Fourteen independent feature checks and strict
+  all-feature/all-target Clippy pass. Native TCP/UDP/TLS fixtures complement
+  paused-time, cancellation and always-ready carrier controls. The
+  [session supplier receipt](../../support/receipts/session-deadlines/supplier.json)
+  records exact source/tree and native hashes, toolchain, commands and scope.
+  DICT/FSP retire interrupted sessions; borrowed carrier recovery remains
+  caller-owned. Scorpion supports one absolute deadline across TLS and later
+  responses. Existing size/framing suites remain green. The sole lock edge
+  adds the already-locked `rcgen` dev dependency to Scorpion, preserving all
+  registry versions/checksums. New evidence retains 12,949 bytes including its
+  byte-preserving attribute; stable targets were reused without new isolated
+  roots. Misfin is unchanged and mail deadlines remain phase 7.
 
 - 2026-10-23: started session deadlines in native DICT, FSP, Kepler/Text and
   Scorpion ownership lanes. Preserve byte-only `Limits` structs, FSP's existing
