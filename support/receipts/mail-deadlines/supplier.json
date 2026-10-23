@@ -1,0 +1,166 @@
+{
+  "schema": "mail-deadlines-qualification-v1",
+  "owner": "native Misfin sending client and explicit Errand mail companion",
+  "date": "2026-10-23",
+  "qualified_source": "8284fc464dabc9af6f4233743449b9f56fc16a94",
+  "qualified_tree": "9e4b959e20ab42f1807dc7b4a30c9d1ddc5e6962",
+  "base_source": "e4e3b8ea84b3592abeb91952b17b8db0f2932445",
+  "crate_trees": {
+    "misfin": "b81ec82360fb2b3115a85cd60f00d2915c83264a",
+    "errand": "98ba16e39132ef7f73e3c018c2b3165c8d9bfa66"
+  },
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "git_lock_blob": "aeee95e98a7f49618dd4be4316ea477a112a2268",
+  "lock_delta": "None. Tokio test-util is a dev-only feature on the already-declared dependency; Cargo.lock and all registry versions/checksums are unchanged.",
+  "native_source_sha256": {
+    "crates/misfin/Cargo.toml": "b9c1b0d4c785914e691c99813c2d846e81366df7b33b02388002acc07da6209b",
+    "crates/misfin/README.md": "ea5472e9703355e7f709f90019937c65e026c97da4b61a7563b1eb1d60d02cf2",
+    "crates/misfin/src/client.rs": "84eb105084895cc6b0b19d2a4d73a75a7a702759e2b0bc581d8b04b993abac92",
+    "crates/misfin/src/client_deadline_tests.rs": "3b6e171db4fa6e19b24b1bd1f5c6e3e6c7351681f1f1fc36e1f3f837f0bcf8fa",
+    "crates/misfin/src/bin/misfin.rs": "b113f4ffb9f29a3e96321cfa6b92b39fcaa2b9b28a9883fd4fa55c67adc8b3d6",
+    "crates/errand/README.md": "9e182944b0680589f7af3cec629d87c9958378bc8ff0f7a7d78c3ef992abb360",
+    "crates/errand/src/lib.rs": "da4c0ca57fc030001ef71cb198f5f7343d7ea57b63b154ce4b0ff9d46286b662",
+    "crates/errand/src/misfin.rs": "e14fb191e7ec95ea846e6960b49c60a4a76b0504c9b15f5fd16a3d68f4021e64"
+  },
+  "toolchain": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo 1.99.1 (5f94df478 2026-08-27)"
+  ],
+  "target": "C:\\t\\cargo-targets\\smolweb",
+  "build_dir": "C:\\t\\cargo-targets\\smolweb\\build",
+  "commands": [
+    {
+      "command": "cargo test --locked --offline -p misfin -p errand --all-features --quiet",
+      "exit_code": 0,
+      "unit_passed": 121,
+      "integration_passed": 14,
+      "doctest_passed": 1,
+      "failed": 0,
+      "ignored": 1,
+      "by_owner": {
+        "errand": { "unit": 69, "integration": 14, "doc": 1, "ignored": 1 },
+        "misfin_library": { "unit": 51, "doc": 0, "ignored": 0 },
+        "misfin_cli": { "unit": 1, "ignored": 0 }
+      },
+      "note": "AWS-LC wins Misfin provider selection with all features. Existing live Nex test remains ignored. Native Misfin server mailbox/client-certificate round trip is included. Parallel harness execution passes after recorded fixture corrections."
+    },
+    {
+      "command": "cargo test -p misfin --no-default-features --features client,ring --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 34,
+      "doctest_passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "note": "Final source with ring alone, including all 15 new native deadline cases. Existing identity_with_validity_years helper emits one dead-code warning in this client-only test graph."
+    },
+    {
+      "command_template": "cargo check --locked --offline -p <crate> --no-default-features --quiet [--features <features>]",
+      "scope": "Eight independent Cargo invocations; core means no feature flag.",
+      "results": [
+        { "crate": "misfin", "features": "core", "exit_code": 0 },
+        { "crate": "misfin", "features": "client,ring", "exit_code": 0 },
+        { "crate": "misfin", "features": "client,aws-lc", "exit_code": 0 },
+        { "crate": "misfin", "features": "server,ring", "exit_code": 0 },
+        { "crate": "misfin", "features": "server,aws-lc", "exit_code": 0 },
+        { "crate": "misfin", "features": "cli", "exit_code": 0 },
+        { "crate": "errand", "features": "core", "exit_code": 0 },
+        { "crate": "errand", "features": "serve", "exit_code": 0 }
+      ]
+    },
+    {
+      "command": "cargo clippy -p misfin --all-features --all-targets --locked --offline --quiet --no-deps -- -D warnings",
+      "exit_code": 0,
+      "strict": true
+    },
+    {
+      "command": "cargo clippy -p errand --all-features --all-targets --locked --offline --quiet --no-deps -- -D warnings",
+      "exit_code": 101,
+      "strict": true,
+      "qualified": false,
+      "baseline_diagnostics": [
+        "crates/errand/src/parse/feed.rs:218 collapsible_if",
+        "crates/errand/src/parse/feed.rs:371 collapsible_match",
+        "crates/errand/src/parse/feed.rs:399 collapsible_match",
+        "crates/errand/src/parse/feed.rs:409 collapsible_if",
+        "crates/errand/src/parse/feed.rs:412 collapsible_if",
+        "crates/errand/src/parse/nex.rs:77 collapsible_if"
+      ],
+      "note": "All six diagnostics are unchanged parser code, also recorded by the previous client-limits slice."
+    },
+    {
+      "command": "cargo clippy -p errand --all-features --all-targets --locked --offline --quiet --no-deps -- -D warnings -A clippy::collapsible_if -A clippy::collapsible_match",
+      "exit_code": 0,
+      "strict": false,
+      "note": "Qualified all-target evidence with exactly the two existing baseline lint allowances."
+    },
+    {
+      "command": "rustfmt --edition 2024 --config skip_children=true --check crates/misfin/src/client.rs crates/misfin/src/client_deadline_tests.rs crates/misfin/src/bin/misfin.rs crates/errand/src/lib.rs crates/errand/src/misfin.rs",
+      "exit_code": 0,
+      "scope": "Every changed Rust source file."
+    },
+    {
+      "command": "cargo fmt -p misfin -p errand -- --check",
+      "exit_code": 1,
+      "qualified": false,
+      "note": "Existing unrelated formatting in Errand parse/feed.rs and serve/adapt.rs, serve/dir.rs fails the whole-package gate. Those files remain byte-identical to the base commit; changed Rust files pass the direct rustfmt gate."
+    },
+    { "command": "git diff --cached --check", "exit_code": 0 }
+  ],
+  "policy": {
+    "per_step_default_seconds": 30,
+    "whole_send_default_seconds": 120,
+    "per_step_option": "misfin::SendOptions::timeout",
+    "whole_send_option": "misfin::SendOptions::send_timeout",
+    "whole_scope": "One fixed monotonic deadline after local request/host/duration/TLS configuration preflight, spanning DNS/TCP, TLS handshake, request write, full response line, and best-effort close-notify.",
+    "step_scope": "A fresh step allowance clamped to the fixed whole-send deadline. Activity never renews the whole budget; the entire response line shares one read step deadline.",
+    "zero_or_overflow": "Zero whole budget refuses before I/O; zero step budget returns Timeout(connect). Unrepresentable durations return InvalidTimeout(scope) before timers. Pure invalid-request, zero and overflow cases are polled without a runtime.",
+    "expiry": "Named existing Timeout(step) remains distinct from WholeSendTimeout. Whole expiry after a complete parsed reply during cleanup retains Some(exact native SendReceipt). No receipt means delivery may be unknown after transmission.",
+    "cleanup": "Step-only close failure remains best effort and returns the known receipt. A primary fingerprint mismatch survives either cleanup deadline without any application request write.",
+    "framing": "Complete CRLF required within the native 2048-byte response limit. Exact fit accepted; EOF, bare LF and a capped partial line cannot become an acknowledgement. Status/META/fingerprint representation and the general status parser remain unchanged.",
+    "cancellation": "Dropping the send future drops its owned connection; no detached cleanup or resend. A dropped future cannot return a reply already received. Deadlines are cooperative and cannot preempt a blocking carrier poll; late ready completions are refused.",
+    "send_authority": "Explicit native or Errand send call only; ordinary fetch refuses Misfin. No retries, redirect-following or automatic resends."
+  },
+  "coverage": {
+    "new_cases": { "native_misfin": 15, "errand_adapter": 5, "cli_formatter": 1 },
+    "actual_localhost_tcp_tls": [
+      "Stalled TLS distinguishes step vs whole timeout and peer observes transport close.",
+      "Delayed handshake plus reply exhausts one cumulative budget after exactly one request.",
+      "Dripping response cannot renew the whole-send allowance.",
+      "Cancellation after peer observes the request closes transport without duplicate data or another connection.",
+      "Fingerprint mismatch preserves expected/found facts and sends no application request.",
+      "20/30/31/40 native statuses, META and server fingerprint are retained without redirects or retry.",
+      "Stalled native response preserves existing response-read step timeout."
+    ],
+    "controlled_carrier_and_paused_time": [
+      "Individually valid steps exceed the single cumulative whole budget.",
+      "Partial request write distinguishes step and whole expiry.",
+      "Pending shutdown after 20/40 reply retains exact receipt on whole expiry.",
+      "Step-only pending/error shutdown retains best-effort successful receipt.",
+      "Pending shutdown after fingerprint refusal preserves primary error and writes nothing.",
+      "Exact response byte cap, EOF, bare LF and overlong framing.",
+      "Always-ready operation crossing the whole deadline cannot return success."
+    ],
+    "adapter_and_cli": [
+      "Errand exact native receipt mapping and distinction from step timeout.",
+      "Default options defer to native policies; zero step and whole options refuse before contact.",
+      "Existing helper delegates to explicit options helper; ordinary fetch rejects mail.",
+      "CLI error output retains native status display, META and server fingerprint."
+    ],
+    "limits": "Real tokio-rustls shutdown does not wait for peer close-notify; pending cleanup expiry is qualified at the shared private AsyncWrite seam rather than falsely claimed as a native peer-stall result. Localhost fixtures do not qualify external DNS, remote mailservers, delivery reconciliation, receiving deadlines, headed product UI, radio, or independent-machine behavior."
+  },
+  "consumer_boundary": "Misfin owns sending semantics. Errand forwards independently selected mail budgets via misfin_send_with_options/MisfinSendOptions and preserves typed native timeout receipts. CLI inherits defaults and retains known receipt fields on error. Mere's mail adapter is receive-only; this supplier-native slice requires no product repin or sending UI.",
+  "preserved": "Shared site snapshot V1, authoring/persistence/actor boundaries, existing session/standalone limits, previous receipts, mailbox receiving source and Cargo.lock are unchanged.",
+  "failed_attempt_receipts": [
+    "preliminary-fixture-failure.json",
+    "parallel-fixture-failure.json",
+    "cli-expectation-failure.json"
+  ],
+  "receipt_budget": {
+    "shared_cap_bytes": 100000000,
+    "retained": "Compact JSON summaries and byte-preserving .gitattributes only; no full logs or copied executables. Existing cited evidence preserved.",
+    "isolated_target_roots_created": [],
+    "isolated_cargo_homes_created": [],
+    "worktrees_created": []
+  },
+  "byte_convention": "Source hashes identify native Windows bytes; Git tree/blob identities identify normalized repository content. JSON has UTF-8 LF bytes under -text attributes. Qualification commit changes docs and receipts only; qualified source remains exact."
+}

@@ -1,9 +1,9 @@
 # Client receive limits
 
-**Status (2026-10-23):** phases 1 to 6 landed and qualified: routed clients,
+**Status (2026-10-23):** phases 1 to 7 landed and qualified: routed clients,
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
-size and framing limits, plus native session operation deadlines. Mail deadlines
-are in progress in phase 7, with whole-send and per-step policy kept distinct.
+size and framing limits, native session operation deadlines, and Misfin mail
+deadlines. Whole-send and per-step policy remain independently configurable.
 
 ## Ownership and scope
 
@@ -197,6 +197,23 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: mail source `8284fc46` completes phase 7. The final combined gate
+  passes 121 unit tests, 14 integration tests and one doctest, with the existing
+  live Nex test ignored. Eight independent feature builds pass; the ring-only
+  native client suite also passes 34 tests. Misfin passes strict all-target
+  Clippy; Errand passes with the two previously recorded parser lint allowances,
+  while its strict gate still reports those six unchanged diagnostics. Changed
+  Rust sources pass formatting; whole-package formatting retains unrelated
+  existing Errand differences. The [mail supplier receipt](../../support/receipts/mail-deadlines/supplier.json)
+  records exact source/tree, native hashes, commands and the three failed
+  preliminary attempts, including a corrected new CLI status-display test
+  expectation. Fifteen native, five adapter and one CLI cases qualify distinct
+  step/whole expiry, cancellation, receipt retention and complete framing.
+  Errand forwards selectable budgets and the CLI preserves known receipt
+  fields on error. Cargo.lock, mailbox receiving and earlier evidence remain
+  unchanged. New compact evidence retains 16,860 bytes; the stable smolweb
+  target/build directory is reused without new isolated roots.
 
 - 2026-10-23: started the mail deadline slice. Native Misfin owns fixed send
   budgets and delivery evidence; Errand owns explicit send option forwarding.
