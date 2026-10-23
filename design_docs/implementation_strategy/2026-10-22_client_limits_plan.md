@@ -4,6 +4,8 @@
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
 size and framing limits, native session operation deadlines, and Misfin mail
 deadlines. Whole-send and per-step policy remain independently configurable.
+Phase 8, Misfin receiving deadlines, is in progress; connection admission and
+joined listener shutdown remain a separate lane.
 
 ## Ownership and scope
 
@@ -94,10 +96,43 @@ receipts. New receipt hashes must state their Git/native byte convention.
    product sending UI remain outside this slice. Retain compact new receipts
    within the shared 100 MB cap without replacing previous evidence.
 
+8. Bound native Misfin receiving transactions. `MisfinServerConfig::timeout`
+   defaults to 30 seconds per TLS/full-request/write/close step, while
+   `receive_timeout` defaults to 120 seconds across the entire accepted
+   connection. Start the fixed deadline at TCP acceptance before spawning;
+   incoming bytes never renew it or the complete request-read allowance.
+   Validate nonzero, representable policy before TLS configuration or binding.
+   Require complete CRLF within the native request ceiling before delivery.
+   Check immediately before and after synchronous mailbox dispatch; an already
+   committed delivery survives timeout, cancellation or reply failure.
+   Done when controlled-carrier and actual localhost TLS fixtures qualify
+   distinct step/whole expiry, cumulative timing, slow requests, blocked write/
+   close, incomplete framing, pre-dispatch refusal and retained committed mail;
+   core/client/server/CLI feature graphs and strict Misfin Clippy pass. Retain
+   exact-source/lock and compact command receipts within the shared 100 MB cap.
+   Connection admission, joined listener shutdown, other protocol servers,
+   product repins and product mail UI remain separately scoped.
+
 ## Findings
 
 ### 2026-10-23
 
+- Misfin receiving's former 30-second read timer restarted per byte; TLS,
+  response write and close were unbounded. The receiving deadline now starts
+  at acceptance and is independent of sending policy. Invalid durations are
+  local configuration errors before TLS or listener I/O. Constructor users
+  retain finite defaults; a workspace usage search found no external config
+  struct literals requiring source repair.
+- The old receive reader returned an EOF-truncated request as a dispatchable
+  line. Only complete CRLF framing may reach mailbox dispatch. The synchronous
+  Redb operation cannot be preempted or rolled back by an async timer; a
+  deadline check after dispatch suppresses a late reply while preserving any
+  delivery already committed. Cancellation has the same uncertainty boundary.
+  Bare LF inside a message remains valid; strip only the final observed CRLF,
+  preserving trailing message newlines that the old trimming discarded.
+- The existing listener still spawns one task per accepted connection and
+  stops accepting when its shutdown future resolves. Receiving deadlines do
+  not establish connection admission limits or joined task shutdown.
 - Misfin's four existing timers bound connect, TLS, write and full response
   reads independently; both success and pin-mismatch shutdown paths were
   unbounded. A fixed send deadline clamps each step, including cleanup, without
@@ -197,6 +232,13 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: started phase 8 in native Misfin. Root owns production, docs and
+  qualification; two bounded Luna lanes own focused tests and read-only review.
+  Required receipts are native/carrying-stream timing results, independent
+  feature/Clippy checks and exact source/lock identities. Reuse the stable
+  smolweb target/build directory; retain compact summaries within the shared
+  100 MB cap. Admission and joined listener shutdown stay in their own lane.
 
 - 2026-10-23: mail source `8284fc46` completes phase 7. The final combined gate
   passes 121 unit tests, 14 integration tests and one doctest, with the existing

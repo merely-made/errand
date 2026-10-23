@@ -40,8 +40,9 @@ use rustls::client::danger::HandshakeSignatureValid;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, DistinguishedName, SignatureScheme};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::Instant;
 use tokio_rustls::TlsAcceptor;
 
 use super::helpers::sha256_hex;
@@ -50,8 +51,8 @@ use super::{
     IdentityCheck, MAX_REQUEST_BYTES, MailboxStore, MisfinAddress, MisfinSender, MisfinServerError,
 };
 
-/// How long to wait for a client to finish sending its request before giving up.
-const REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_RECEIVE_STEP_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A gemini-shaped misfin reply: a two-digit `status` and a `meta` string,
 /// encoded as `<status> <meta>\r\n`.
@@ -102,6 +103,13 @@ pub struct MisfinServerConfig {
     /// fingerprint (the spec's "you're a liar"). On by default; the stored
     /// fingerprint is never silently overwritten.
     pub reject_changed_sender: bool,
+    /// Per-step allowance for TLS, the complete request, response write and
+    /// close-notify. Default 30 seconds; incoming bytes never renew a step.
+    pub timeout: Duration,
+    /// Whole receiving transaction, measured from TCP acceptance through
+    /// close-notify. Default 120 seconds, independent of the step allowance.
+    /// Both durations must be nonzero and representable by the monotonic clock.
+    pub receive_timeout: Duration,
 }
 
 impl MisfinServerConfig {
@@ -118,7 +126,84 @@ impl MisfinServerConfig {
             served,
             require_sender_identity: false,
             reject_changed_sender: true,
+            timeout: DEFAULT_RECEIVE_STEP_TIMEOUT,
+            receive_timeout: DEFAULT_RECEIVE_TIMEOUT,
         }
+    }
+}
+
+fn validate_receive_timeouts(timeout: Duration, receive_timeout: Duration) -> io::Result<()> {
+    for (scope, duration) in [("per-step", timeout), ("whole-receive", receive_timeout)] {
+        if duration.is_zero() || std::time::Instant::now().checked_add(duration).is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid misfin {scope} timeout"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// One accepted transaction; queueing before its first poll consumes time too.
+struct ReceiveBudget {
+    deadline: Instant,
+    timeout: Duration,
+}
+
+impl ReceiveBudget {
+    fn new(accepted_at: Instant, timeout: Duration, receive_timeout: Duration) -> io::Result<Self> {
+        validate_receive_timeouts(timeout, receive_timeout)?;
+        let deadline = accepted_at.checked_add(receive_timeout).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid misfin whole-receive timeout",
+            )
+        })?;
+        Ok(Self { deadline, timeout })
+    }
+
+    fn check(&self) -> io::Result<()> {
+        if Instant::now() >= self.deadline {
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "misfin receive timed out",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn dispatch(&self, operation: impl FnOnce() -> MisfinResponse) -> io::Result<MisfinResponse> {
+        // Storage is synchronous. Expiry prevents starting it, but cannot
+        // interrupt or roll back an operation that has already committed.
+        self.check()?;
+        let response = operation();
+        self.check()?;
+        Ok(response)
+    }
+
+    async fn step<T>(
+        &self,
+        name: &'static str,
+        operation: impl Future<Output = io::Result<T>>,
+    ) -> io::Result<T> {
+        self.check()?;
+        let deadline = Instant::now()
+            .checked_add(self.timeout)
+            .unwrap_or(self.deadline)
+            .min(self.deadline);
+        let result = tokio::time::timeout_at(deadline, operation).await;
+        // Timers are cooperative: reject a ready result that crossed a deadline.
+        self.check()?;
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("misfin {name} timed out"),
+            ));
+        }
+        result.map_err(|_| {
+            io::Error::new(io::ErrorKind::TimedOut, format!("misfin {name} timed out"))
+        })?
     }
 }
 
@@ -251,13 +336,17 @@ fn unix_now() -> u64 {
 pub struct MisfinServer {
     acceptor: TlsAcceptor,
     dispatcher: Arc<Dispatcher>,
+    timeout: Duration,
+    receive_timeout: Duration,
 }
 
 impl MisfinServer {
     /// Build a server from its `config` and a mailbox `store`. Constructs the
     /// TLS acceptor (a client-cert-requesting, TOFU-permissive handshake); fails
-    /// only if the supplied certificate / key are unusable.
+    /// if timeouts are zero/unrepresentable or certificate/key are unusable.
     pub fn new(config: MisfinServerConfig, store: MailboxStore) -> Result<Self, MisfinServerError> {
+        validate_receive_timeouts(config.timeout, config.receive_timeout)
+            .map_err(|error| MisfinServerError::Config(error.to_string()))?;
         let cert = CertificateDer::from(config.tls_certificate_der);
         let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(config.tls_private_key_pkcs8_der));
         let tls_config = rustls::ServerConfig::builder_with_provider(crate::client::tls_provider())
@@ -274,6 +363,8 @@ impl MisfinServer {
                 require_sender_identity: config.require_sender_identity,
                 reject_changed_sender: config.reject_changed_sender,
             }),
+            timeout: config.timeout,
+            receive_timeout: config.receive_timeout,
         })
     }
 
@@ -287,6 +378,8 @@ impl MisfinServer {
             acceptor: self.acceptor,
             dispatcher: self.dispatcher,
             listener,
+            timeout: self.timeout,
+            receive_timeout: self.receive_timeout,
         })
     }
 }
@@ -297,6 +390,8 @@ pub struct BoundMisfinServer {
     acceptor: TlsAcceptor,
     dispatcher: Arc<Dispatcher>,
     listener: TcpListener,
+    timeout: Duration,
+    receive_timeout: Duration,
 }
 
 impl BoundMisfinServer {
@@ -316,9 +411,15 @@ impl BoundMisfinServer {
                 _ = &mut shutdown => break,
                 accepted = self.listener.accept() => match accepted {
                     Ok((tcp, _peer)) => {
+                        let budget = ReceiveBudget::new(Instant::now(), self.timeout, self.receive_timeout)
+                            .map_err(|error| MisfinServerError::Config(error.to_string()))?;
                         let acceptor = self.acceptor.clone();
                         let dispatcher = self.dispatcher.clone();
-                        tokio::spawn(handle_connection(acceptor, dispatcher, tcp));
+                        tokio::spawn(async move {
+                            if let Err(error) = handle_connection(acceptor, dispatcher, tcp, budget).await {
+                                log::debug!("misfin: receiving connection failed: {error}");
+                            }
+                        });
                     }
                     Err(error) => log::warn!("misfin: accept failed: {error}"),
                 },
@@ -328,46 +429,58 @@ impl BoundMisfinServer {
     }
 }
 
-async fn handle_connection(acceptor: TlsAcceptor, dispatcher: Arc<Dispatcher>, tcp: TcpStream) {
-    let mut tls = match acceptor.accept(tcp).await {
-        Ok(tls) => tls,
-        Err(error) => {
-            log::debug!("misfin: TLS handshake failed: {error}");
-            return;
-        }
-    };
-    let response = match read_request(&mut tls).await {
-        Ok(RequestRead::Line(request)) => {
-            let peer_cert = tls
-                .get_ref()
-                .1
-                .peer_certificates()
-                .and_then(|certs| certs.first())
-                .cloned();
-            dispatcher.dispatch(&request, peer_cert.as_ref(), unix_now())
-        }
-        Ok(RequestRead::TooLong) => MisfinResponse::new(59, "Request exceeds 2048 bytes."),
-        Ok(RequestRead::NotUtf8) => MisfinResponse::new(59, "Request is not UTF-8."),
-        Err(error) => {
-            log::debug!("misfin: reading request failed: {error}");
-            return;
-        }
-    };
-    if let Err(error) = tls.write_all(response.encode().as_bytes()).await {
-        log::debug!("misfin: writing response failed: {error}");
-    }
-    let _ = tls.shutdown().await;
+async fn handle_connection(
+    acceptor: TlsAcceptor,
+    dispatcher: Arc<Dispatcher>,
+    tcp: TcpStream,
+    budget: ReceiveBudget,
+) -> io::Result<()> {
+    let mut tls = budget.step("TLS handshake", acceptor.accept(tcp)).await?;
+    let peer_cert = tls
+        .get_ref()
+        .1
+        .peer_certificates()
+        .and_then(|certs| certs.first())
+        .cloned();
+    receive(&mut tls, &dispatcher, peer_cert.as_ref(), &budget).await
 }
 
-/// The outcome of reading a request line: the line (CR/LF trimmed), or a
+// The same exchange runs over TLS and controlled carriers in deadline tests.
+async fn receive<S>(
+    stream: &mut S,
+    dispatcher: &Dispatcher,
+    peer_cert: Option<&CertificateDer<'_>>,
+    budget: &ReceiveBudget,
+) -> io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let request = budget.step("request read", read_request(stream)).await?;
+    let response = budget.dispatch(|| match request {
+        RequestRead::Line(request) => dispatcher.dispatch(&request, peer_cert, unix_now()),
+        RequestRead::TooLong => MisfinResponse::new(59, "Request exceeds 2048 bytes."),
+        RequestRead::NotUtf8 => MisfinResponse::new(59, "Request is not UTF-8."),
+        RequestRead::Incomplete => MisfinResponse::new(59, "Request requires CRLF."),
+    })?;
+    budget
+        .step(
+            "response write",
+            stream.write_all(response.encode().as_bytes()),
+        )
+        .await?;
+    budget.step("TLS close", stream.shutdown()).await
+}
+
+/// The outcome of reading a request line: the request without its CRLF, or a
 /// protocol violation the caller should answer with 59.
 enum RequestRead {
     Line(String),
     TooLong,
     NotUtf8,
+    Incomplete,
 }
 
-/// Read the request line: bytes up to the first CRLF, with a read timeout.
+/// Read the complete request line; the caller times the entire read once.
 /// A request that reaches the spec's 2048-byte ceiling without a CRLF is
 /// over-long (the ceiling includes the terminator).
 async fn read_request<S>(stream: &mut S) -> io::Result<RequestRead>
@@ -377,19 +490,9 @@ where
     let mut buf = Vec::with_capacity(256);
     let mut byte = [0u8; 1];
     loop {
-        let read = tokio::time::timeout(REQUEST_READ_TIMEOUT, stream.read(&mut byte)).await;
-        let count = match read {
-            Ok(Ok(count)) => count,
-            Ok(Err(error)) => return Err(error),
-            Err(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "misfin request read timed out",
-                ));
-            }
-        };
+        let count = stream.read(&mut byte).await?;
         if count == 0 {
-            break;
+            return Ok(RequestRead::Incomplete);
         }
         buf.push(byte[0]);
         if buf.ends_with(b"\r\n") {
@@ -400,9 +503,12 @@ where
         }
     }
     match String::from_utf8(buf) {
-        Ok(text) => Ok(RequestRead::Line(
-            text.trim_end_matches(['\r', '\n']).to_string(),
-        )),
+        Ok(mut text) => {
+            // Only the observed wire terminator is framing. Bare newlines,
+            // including trailing message newlines, are valid message content.
+            text.truncate(text.len() - 2);
+            Ok(RequestRead::Line(text))
+        }
         Err(_) => Ok(RequestRead::NotUtf8),
     }
 }
@@ -470,6 +576,10 @@ impl ClientCertVerifier for AcceptAnyClient {
 }
 
 #[cfg(test)]
+#[path = "server_deadline_tests.rs"]
+mod server_deadline_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{MisfinIdentitySpec, MisfinStatus, client, deterministic_identity};
@@ -485,13 +595,13 @@ mod tests {
     }
 
     /// Mint a certificate DER for use as a peer/client certificate in a test.
-    fn cert_der(seed: u8, addr: &str) -> Vec<u8> {
+    pub(super) fn cert_der(seed: u8, addr: &str) -> Vec<u8> {
         deterministic_identity(&[seed; 32], &spec(addr))
             .unwrap()
             .certificate_der
     }
 
-    fn dispatcher_for(mailbox: &str) -> (Dispatcher, String) {
+    pub(super) fn dispatcher_for(mailbox: &str) -> (Dispatcher, String) {
         let identity = deterministic_identity(&[9u8; 32], &spec(mailbox)).unwrap();
         let fingerprint = sha256_hex(&identity.certificate_der);
         let dispatcher = Dispatcher {
@@ -720,7 +830,9 @@ mod tests {
         String::from_utf8_lossy(&raw).to_string()
     }
 
-    async fn test_tls_client(addr: SocketAddr) -> tokio_rustls::client::TlsStream<TcpStream> {
+    pub(super) async fn test_tls_client(
+        addr: SocketAddr,
+    ) -> tokio_rustls::client::TlsStream<TcpStream> {
         use rustls::client::danger::{ServerCertVerified, ServerCertVerifier};
         use rustls::pki_types::ServerName;
 

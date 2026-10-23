@@ -121,6 +121,31 @@ caller owns delivery reconciliation and any explicit resend. Deadlines are
 cooperative: a custom blocking poll cannot be preempted, while late ready
 completions are refused. Mailbox receiving deadlines remain server-owned.
 
+## Receiving deadlines
+
+`MisfinServerConfig::new` supplies `timeout` of 30 seconds per TLS handshake,
+complete request-line read, response write and close-notify, plus an independent
+`receive_timeout` of 120 seconds for the whole accepted connection. Set these
+`Duration` fields before `MisfinServer::new` to select another policy. Zero or
+unrepresentable durations fail as configuration errors before TLS setup or
+binding. The fixed deadline starts at TCP acceptance, including time before
+the connection task first runs; listener idle time is not charged. Incoming
+bytes never renew the full request-read deadline or the whole allowance.
+
+Only a complete CRLF request within 2048 wire bytes can deliver mail. EOF before
+CRLF and overlong framing cannot deliver a partial message. Bare LF inside the
+message remains valid; it does not terminate the request. Expiry before dispatch
+prevents delivery. Mailbox storage is synchronous: a timer cannot preempt or
+undo an in-progress commit. A late commit remains stored, while its reply is
+suppressed; reply/close failure or cancellation likewise never removes a
+committed message. The sender may therefore have an unknown delivery outcome.
+These are cooperative deadlines; late ready completions are refused.
+
+Receiving policy is independent of `SendOptions` and changes no mailbox trust
+or identity rules. The listener's existing task spawning and shutdown behavior
+remains: connection admission limits and joining accepted tasks on shutdown
+need their separate host lifecycle slice.
+
 ## License
 
 MIT, matching how the protocol's own repository licenses its reference

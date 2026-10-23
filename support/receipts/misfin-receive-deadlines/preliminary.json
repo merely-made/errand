@@ -1,0 +1,36 @@
+{
+  "schema": "misfin-receive-deadlines-preliminary-v1",
+  "date": "2026-10-23",
+  "qualified": false,
+  "base_source": "c80646b771c4d6e8d7d73fceb4f4a251e02ad9d5",
+  "focused_lane": {
+    "command": "cargo test -p misfin --features server,ring --locked --offline server_deadline_tests -- --test-threads=1",
+    "exit_code": 0,
+    "passed": 19,
+    "filtered": 51,
+    "failed": 0,
+    "native_server_sha256": "bdb67f23fd0aac2ee02df5a2a345ce9f23ef211300f370209ae44c6ae5cbb842",
+    "native_tests_sha256": "844cbfaa4b9531e98b3eb9effe146206cc1f4a79c7588e5e5adf5eceae2fb3a7",
+    "test_executable_sha256": "fbb0a160454b09a6eddd097a37816330030f3b8efdf8668e74e2b7568f9ae029",
+    "qualification_limits": "Earlier source, before exact CRLF suffix stripping preserved trailing message LF. Lane set BUILD_BUILD_DIR instead of CARGO_BUILD_BUILD_DIR; repository build-dir config took effect. Final gates use both approved environment variables explicitly."
+  },
+  "strict_clippy_attempt": {
+    "command": "cargo clippy -p misfin --all-features --all-targets --locked --offline --quiet --no-deps -- -D warnings",
+    "exit_code": 101,
+    "diagnostic": "clippy::async_yields_async at server_deadline_tests.rs:635; test spawned a handler from a spawned acceptance task and returned its JoinHandle.",
+    "native_tests_sha256": "45737831c066846e96c6a7dfebd23cac3d1712c4015e52bda29fa7ab4372dafb",
+    "remedy": "Await handle_connection directly in the single fixture task. Strengthen invalid-policy error assertions, multiline trailing-LF preservation, actual fixture store observation and public configured-deadline/fresh-accept coverage. Production deadline code is unchanged by this fixture correction."
+  },
+  "unexpected_build_cache": {
+    "path": "C:\\Users\\mark_\\Code\\repos\\smolweb\\target\\build",
+    "new_file_count": 1234,
+    "new_bytes": 356351526,
+    "creation_and_write_window_utc": "2026-10-23 23:01:18 through 23:03:36",
+    "marker": "Parent target/CACHEDIR.TAG verified Cargo cache signature 8a477f597d28d172789f06886806bc55.",
+    "live_owner_check": "No cargo/rustc/rustdoc/Misfin process command line referenced this cache after the lane released Cargo; unrelated workspace builds were preserved.",
+    "cleanup_outcome": "Automatic approval review rejected the verified new-file-only cleanup and a narrower literal-path test executable/PDB/dep-info cleanup as blocked by policy. Neither deletion command ran. Task-created generated cache remains; existing cache/source/evidence was not removed.",
+    "owner": "Misfin receiving test lane; retained solely because cleanup was blocked."
+  },
+  "retained_evidence": "Compact JSON only; no copied binary or full logs. Generated cache bytes above are build output rather than retained qualification evidence. Final qualification is recorded separately.",
+  "byte_convention": "UTF-8 LF JSON under -text; source hashes identify native Windows bytes."
+}
