@@ -19,10 +19,44 @@ pub const DEFAULT_PORT: u16 = 2009;
 /// Kepler inside TLS.
 pub const DEFAULT_TLS_PORT: u16 = 10009;
 
+/// Per-exchange wire budgets. Request and header limits include their CRLF.
+/// A zero body budget accepts only an empty body; zero line budgets refuse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Limits {
+    pub max_request_bytes: usize,
+    pub max_header_line_bytes: usize,
+    pub max_body_bytes: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_request_bytes: 4096,
+            // The old 1024-byte guard counted CR but not the final LF.
+            max_header_line_bytes: 1025,
+            max_body_bytes: 64 * 1024 * 1024,
+        }
+    }
+}
+
+fn check_request(request_bytes: usize, limits: &Limits) -> Result<(), ClientError> {
+    if limits.max_request_bytes == 0
+        || request_bytes > limits.max_request_bytes
+        || limits.max_header_line_bytes == 0
+    {
+        return Err(ClientError::Limit(
+            "request or header line budget exceeded".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// What can go wrong.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientError {
     BadUrl(String),
+    /// A caller-supplied wire budget was exceeded.
+    Limit(String),
     Connect(String),
     Io(String),
     /// The reply did not obey the grammar.
@@ -32,6 +66,7 @@ pub enum ClientError {
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Limit(m) => write!(f, "limit: {m}"),
             Self::BadUrl(m) => write!(f, "bad url: {m}"),
             Self::Connect(m) => write!(f, "connect: {m}"),
             Self::Io(m) => write!(f, "io: {m}"),
@@ -75,12 +110,32 @@ impl Response {
 /// you hold none. A server may answer `7x` to say it has not changed, which is
 /// the exchange kepler adds over its relatives.
 pub async fn fetch(url: &str, last_cached: i64, language: &str) -> Result<Response, ClientError> {
-    let parsed = Url::parse(url).map_err(|e| ClientError::BadUrl(e.to_string()))?;
+    fetch_with_limits(url, last_cached, language, &Limits::default()).await
+}
+
+/// Fetch using caller-owned size budgets. Session deadlines remain caller-owned.
+pub async fn fetch_with_limits(
+    url: &str,
+    last_cached: i64,
+    language: &str,
+    limits: &Limits,
+) -> Result<Response, ClientError> {
     if url.len() > MAX_URI {
-        return Err(ClientError::BadUrl(format!(
-            "URI exceeds {MAX_URI} bytes"
-        )));
+        return Err(ClientError::BadUrl(format!("URI exceeds {MAX_URI} bytes")));
     }
+    if url.contains(['\r', '\n']) || language.contains(['\r', '\n']) {
+        return Err(ClientError::BadUrl(
+            "request field contains a line break".into(),
+        ));
+    }
+    let request_bytes = url
+        .len()
+        .checked_add(language.len())
+        .and_then(|n| n.checked_add(last_cached.to_string().len()))
+        .and_then(|n| n.checked_add(4))
+        .ok_or_else(|| ClientError::Limit("request length overflow".into()))?;
+    check_request(request_bytes, limits)?;
+    let parsed = Url::parse(url).map_err(|e| ClientError::BadUrl(e.to_string()))?;
     if parsed.fragment().is_some() {
         return Err(ClientError::BadUrl("kepler URIs carry no fragment".into()));
     }
@@ -104,7 +159,7 @@ pub async fn fetch(url: &str, last_cached: i64, language: &str) -> Result<Respon
     if secure {
         #[cfg(feature = "tls")]
         {
-            return crate::tls::exchange_tls(host, port, line.as_bytes()).await;
+            return crate::tls::exchange_tls(host, port, line.as_bytes(), limits).await;
         }
         #[cfg(not(feature = "tls"))]
         {
@@ -117,7 +172,7 @@ pub async fn fetch(url: &str, last_cached: i64, language: &str) -> Result<Respon
     let stream = TcpStream::connect((host, port))
         .await
         .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
-    exchange(stream, line.as_bytes()).await
+    exchange_with_limits(stream, line.as_bytes(), limits).await
 }
 
 /// Run the exchange over any connected stream.
@@ -128,58 +183,87 @@ pub async fn exchange<S>(mut stream: S, request: &[u8]) -> Result<Response, Clie
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
+    exchange_with_limits(&mut stream, request, &Limits::default()).await
+}
+
+/// Exchange over a supplied carrier using explicit wire budgets.
+pub async fn exchange_with_limits<S>(
+    mut stream: S,
+    request: &[u8],
+    limits: &Limits,
+) -> Result<Response, ClientError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    check_request(request.len(), limits)?;
     stream
         .write_all(request)
         .await
         .map_err(|e| ClientError::Io(e.to_string()))?;
-
-    // The header is one line. Read byte-wise so the body that follows is not
-    // swallowed by a buffered reader we would then have to unwind.
-    let mut line = Vec::with_capacity(64);
+    let mut line = Vec::new();
     let mut byte = [0u8; 1];
     loop {
-        let count = stream
+        if stream
             .read(&mut byte)
             .await
-            .map_err(|e| ClientError::Io(e.to_string()))?;
-        if count == 0 {
-            break;
+            .map_err(|e| ClientError::Io(e.to_string()))?
+            == 0
+        {
+            return Err(ClientError::Protocol("header ended without CRLF".into()));
         }
-        if byte[0] == b'\n' {
-            break;
+        if line.len() >= limits.max_header_line_bytes {
+            return Err(ClientError::Limit(
+                "response header line budget exceeded".into(),
+            ));
         }
         line.push(byte[0]);
-        if line.len() > MAX_URI {
-            return Err(ClientError::Protocol("header line is unreasonable".into()));
+        if byte[0] == b'\n' {
+            if !line.ends_with(b"\r\n") {
+                return Err(ClientError::Protocol("header ended without CRLF".into()));
+            }
+            break;
         }
     }
-
-    let text = String::from_utf8(line).map_err(|_| ClientError::Protocol("header is not UTF-8".into()))?;
-    let header = parse_header(&text).map_err(|e| ClientError::Protocol(e.0))?;
-
-    let body = match &header {
-        // A declared length is read exactly; -1 means read to end of stream.
-        Header::Success { cache, .. } if cache.has_length() => {
-            let mut body = Vec::new();
-            stream
-                .take(cache.length as u64)
-                .read_to_end(&mut body)
+    let text = std::str::from_utf8(&line[..line.len() - 2])
+        .map_err(|_| ClientError::Protocol("header is not UTF-8".into()))?;
+    let header = parse_header(text).map_err(|e| ClientError::Protocol(e.0))?;
+    let mut body = Vec::new();
+    if let Header::Success { cache, .. } = &header {
+        let known_length = if cache.has_length() {
+            let length = usize::try_from(cache.length)
+                .map_err(|_| ClientError::Limit("declared body exceeds platform size".into()))?;
+            if length > limits.max_body_bytes {
+                return Err(ClientError::Limit("declared body budget exceeded".into()));
+            }
+            Some(length)
+        } else {
+            None
+        };
+        let mut chunk = [0u8; 8192];
+        loop {
+            let remaining = known_length.unwrap_or(limits.max_body_bytes) - body.len();
+            if known_length.is_some() && remaining == 0 {
+                break;
+            }
+            let read_size = remaining
+                .saturating_add(usize::from(known_length.is_none()))
+                .min(chunk.len());
+            let count = stream
+                .read(&mut chunk[..read_size])
                 .await
                 .map_err(|e| ClientError::Io(e.to_string()))?;
-            body
-        },
-        Header::Success { .. } => {
-            let mut body = Vec::new();
-            stream
-                .read_to_end(&mut body)
-                .await
-                .map_err(|e| ClientError::Io(e.to_string()))?;
-            body
-        },
-        // No other class carries a body.
-        _ => Vec::new(),
-    };
-
+            if count == 0 {
+                if known_length.is_some() {
+                    return Err(ClientError::Protocol("declared body ended early".into()));
+                }
+                break;
+            }
+            if count > remaining {
+                return Err(ClientError::Limit("response body budget exceeded".into()));
+            }
+            body.extend_from_slice(&chunk[..count]);
+        }
+    }
     Ok(Response { header, body })
 }
 
@@ -258,7 +342,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_fragment_is_refused_before_connecting() {
-        let error = fetch("kepler://example.net/a#frag", 0, "en").await.unwrap_err();
+        let error = fetch("kepler://example.net/a#frag", 0, "en")
+            .await
+            .unwrap_err();
         assert!(matches!(error, ClientError::BadUrl(_)), "got {error:?}");
     }
 

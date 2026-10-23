@@ -150,7 +150,7 @@ fn parse_link(rest: &str) -> LinkLine {
             // containing `=` stays label text.
             Some((key, value)) if label_parts.is_empty() && !key.is_empty() => {
                 attributes.push((key.to_string(), value.to_string()));
-            },
+            }
             _ => label_parts.push(token),
         }
     }
@@ -170,9 +170,48 @@ mod client {
 
     use super::{DEFAULT_PORT, Header, parse_header, request_line};
 
+    /// Per-exchange wire budgets. Line budgets include CRLF; zero body permits only empty responses.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Limits {
+        pub max_request_bytes: usize,
+        pub max_header_line_bytes: usize,
+        pub max_body_bytes: usize,
+    }
+
+    impl Default for Limits {
+        fn default() -> Self {
+            Self {
+                max_request_bytes: 4096,
+                max_header_line_bytes: 4097,
+                max_body_bytes: 64 * 1024 * 1024,
+            }
+        }
+    }
+
+    pub(super) fn check_request(iri: &str, limits: &Limits) -> Result<(), ClientError> {
+        if iri.contains(['\r', '\n']) {
+            return Err(ClientError::BadUrl(
+                "IRI contains a request line break".into(),
+            ));
+        }
+        if iri
+            .len()
+            .checked_add(2)
+            .is_none_or(|n| n > limits.max_request_bytes)
+            || limits.max_header_line_bytes == 0
+        {
+            return Err(ClientError::Limit(
+                "request or header line budget exceeded".into(),
+            ));
+        }
+        Ok(())
+    }
+
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum ClientError {
         BadUrl(String),
+        /// A caller-supplied wire budget was exceeded.
+        Limit(String),
         Connect(String),
         Io(String),
         /// The reply's first line was not one of the three the protocol has.
@@ -182,6 +221,7 @@ mod client {
     impl std::fmt::Display for ClientError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
+                Self::Limit(m) => write!(f, "limit: {m}"),
                 Self::BadUrl(m) => write!(f, "bad url: {m}"),
                 Self::Connect(m) => write!(f, "connect: {m}"),
                 Self::Io(m) => write!(f, "io: {m}"),
@@ -201,6 +241,12 @@ mod client {
 
     /// Fetch a `text://` IRI over plain TCP (the Mercury port).
     pub async fn fetch(iri: &str) -> Result<Response, ClientError> {
+        fetch_with_limits(iri, &Limits::default()).await
+    }
+
+    /// Fetch over TCP with caller-owned size budgets.
+    pub async fn fetch_with_limits(iri: &str, limits: &Limits) -> Result<Response, ClientError> {
+        check_request(iri, limits)?;
         let parsed = url::Url::parse(iri).map_err(|e| ClientError::BadUrl(e.to_string()))?;
         if parsed.scheme() != "text" {
             return Err(ClientError::BadUrl(format!(
@@ -215,7 +261,7 @@ mod client {
         let mut stream = TcpStream::connect((host, port))
             .await
             .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
-        exchange(iri, &mut stream).await
+        exchange_with_limits(iri, &mut stream, limits).await
     }
 
     /// Run the exchange over any connected stream, so an encrypted carrier
@@ -224,44 +270,79 @@ mod client {
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
+        exchange_with_limits(iri, stream, &Limits::default()).await
+    }
+
+    /// Run a supplied-carrier exchange with explicit wire budgets.
+    pub async fn exchange_with_limits<S>(
+        iri: &str,
+        stream: &mut S,
+        limits: &Limits,
+    ) -> Result<Response, ClientError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        check_request(iri, limits)?;
         stream
             .write_all(request_line(iri).as_bytes())
             .await
             .map_err(|e| ClientError::Io(e.to_string()))?;
-
-        let mut line = Vec::with_capacity(64);
+        let mut line = Vec::new();
         let mut byte = [0u8; 1];
         loop {
-            let count = stream
+            if stream
                 .read(&mut byte)
                 .await
-                .map_err(|e| ClientError::Io(e.to_string()))?;
-            if count == 0 || byte[0] == b'\n' {
-                break;
+                .map_err(|e| ClientError::Io(e.to_string()))?
+                == 0
+            {
+                return Err(ClientError::Protocol("header ended without CRLF".into()));
+            }
+            if line.len() >= limits.max_header_line_bytes {
+                return Err(ClientError::Limit(
+                    "response header line budget exceeded".into(),
+                ));
             }
             line.push(byte[0]);
-            if line.len() > 4096 {
-                return Err(ClientError::Protocol("header line is unreasonable".into()));
+            if byte[0] == b'\n' {
+                if !line.ends_with(b"\r\n") {
+                    return Err(ClientError::Protocol("header ended without CRLF".into()));
+                }
+                break;
             }
         }
-        let text = String::from_utf8(line)
+        let text = std::str::from_utf8(&line[..line.len() - 2])
             .map_err(|_| ClientError::Protocol("header is not UTF-8".into()))?;
-        let header =
-            parse_header(&text).ok_or_else(|| ClientError::Protocol(format!("not a text-protocol status: {text:?}")))?;
-
+        let header = parse_header(text).ok_or_else(|| {
+            ClientError::Protocol(format!("not a text-protocol status: {text:?}"))
+        })?;
         let mut body = Vec::new();
         if header.status == super::Status::Ok {
-            stream
-                .read_to_end(&mut body)
-                .await
-                .map_err(|e| ClientError::Io(e.to_string()))?;
+            let mut chunk = [0u8; 8192];
+            loop {
+                let remaining = limits.max_body_bytes - body.len();
+                let read_size = remaining.saturating_add(1).min(chunk.len());
+                let count = stream
+                    .read(&mut chunk[..read_size])
+                    .await
+                    .map_err(|e| ClientError::Io(e.to_string()))?;
+                if count == 0 {
+                    break;
+                }
+                if count > remaining {
+                    return Err(ClientError::Limit("response body budget exceeded".into()));
+                }
+                body.extend_from_slice(&chunk[..count]);
+            }
         }
         Ok(Response { header, body })
     }
 }
 
 #[cfg(feature = "client")]
-pub use client::{ClientError, Response, exchange, fetch};
+pub use client::{
+    ClientError, Limits, Response, exchange, exchange_with_limits, fetch, fetch_with_limits,
+};
 
 /// Fetch over TLS (the port the spec names Gemini). Certificates are accepted
 /// without verification, stated rather than hidden: the protocol's own
@@ -269,6 +350,13 @@ pub use client::{ClientError, Response, exchange, fetch};
 /// confidentiality, not peer authentication.
 #[cfg(feature = "tls")]
 pub async fn fetch_tls(iri: &str) -> Result<Response, ClientError> {
+    fetch_tls_with_limits(iri, &Limits::default()).await
+}
+
+/// Fetch over TLS with caller-owned size budgets and existing certificate policy.
+#[cfg(feature = "tls")]
+pub async fn fetch_tls_with_limits(iri: &str, limits: &Limits) -> Result<Response, ClientError> {
+    client::check_request(iri, limits)?;
     let parsed = url::Url::parse(iri).map_err(|e| ClientError::BadUrl(e.to_string()))?;
     if parsed.scheme() != "text" {
         return Err(ClientError::BadUrl(format!(
@@ -282,16 +370,14 @@ pub async fn fetch_tls(iri: &str) -> Result<Response, ClientError> {
         .to_string();
     let port = parsed.port().unwrap_or(DEFAULT_TLS_PORT);
     let mut stream = tls::connect(&host, port).await?;
-    client::exchange(iri, &mut stream).await
+    client::exchange_with_limits(iri, &mut stream, limits).await
 }
 
 #[cfg(feature = "tls")]
 mod tls {
     use std::sync::Arc;
 
-    use rustls::client::danger::{
-        HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
-    };
+    use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
     use rustls::{DigitallySignedStruct, SignatureScheme};
     use tokio::net::TcpStream;
@@ -389,13 +475,20 @@ mod tests {
             Status::Redirect
         );
         assert_eq!(parse_header("40 NOK").unwrap().status, Status::Nok);
-        assert_eq!(parse_header("51 not found"), None, "the protocol has three codes");
+        assert_eq!(
+            parse_header("51 not found"),
+            None,
+            "the protocol has three codes"
+        );
         assert_eq!(parse_header("garbage"), None);
     }
 
     #[test]
     fn the_request_is_an_iri_and_a_crlf_and_nothing_else() {
-        assert_eq!(request_line("text://textprotocol.org/"), "text://textprotocol.org/\r\n");
+        assert_eq!(
+            request_line("text://textprotocol.org/"),
+            "text://textprotocol.org/\r\n"
+        );
     }
 
     #[test]
@@ -405,7 +498,10 @@ mod tests {
             panic!("expected a link");
         };
         assert_eq!(link.url, "text://textprotocol.org/license.txt");
-        assert_eq!(link.attributes, vec![("rel".to_string(), "license".to_string())]);
+        assert_eq!(
+            link.attributes,
+            vec![("rel".to_string(), "license".to_string())]
+        );
         assert_eq!(link.label.as_deref(), Some("CC0-1.0"));
     }
 
@@ -477,3 +573,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "client"))]
+mod limits_tests;

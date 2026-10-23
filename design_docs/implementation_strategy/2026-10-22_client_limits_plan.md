@@ -1,8 +1,9 @@
 # Client receive limits
 
 **Status (2026-10-22):** phases 1 to 4 landed: routed clients, native Micron
-limits and browser receiving are published and qualified. Standalone session
-follow-ups in phase 5 remain open.
+limits and browser receiving are published and qualified. Phase 5, standalone
+DICT/FSP/Kepler/Text size and framing limits, is in progress. Session and mail
+deadlines remain a separate phase 6.
 
 ## Ownership and scope
 
@@ -21,11 +22,12 @@ its outer deadline including graceful endpoint shutdown. Mere owns the
 page/subresource policy and the bodyless document fetch adapter. These are
 consumer boundaries, rather than a new shared transport runtime.
 
-Work on the clean smolweb and Turnstone main checkouts. Retinue's existing
-I2P work was merged with the upstream Signalman receiving change without
-dropping either. Mere's active publication/index work requires the isolated
-`Code/worktrees/mere-client-limits` checkout; integrate and remove it after
-publication. Reuse the existing stable repository Cargo targets. Required
+The standalone slice works on smolweb main. Its four native client crates own
+their limits; this does not add Errand routes or product adapters. No active
+consumer of these client APIs was found in Mere, Turnstone, Knot or Genet;
+patch-table entries alone do not require consumer repins. Earlier consumer
+worktrees have been integrated and removed. Reuse the existing stable repository
+Cargo targets. Required
 receipts are compact source/lock identities and focused command results under
 a **100 MB total retained-byte cap across repositories**. Do not replace older
 receipts. New receipt hashes must state their Git/native byte convention.
@@ -50,18 +52,42 @@ receipts. New receipt hashes must state their Git/native byte convention.
    Done when focused native tests, feature checks and production Clippy pass
    for the changed owners; source/lock receipts name every exercised boundary.
    Headed UI, radio and independent-reader qualification are separate gates.
-5. Follow with standalone native/session contracts. DICT needs bounded inbound
-   lines, definition/result aggregates and an operation deadline. FSP needs
-   bounded file/list aggregation and checked offsets, retaining its datagram
-   retries. Kepler/Text need bounded request/header/body and whole-operation
-   deadlines; Kepler must also refuse short declared bodies. Scorpion needs a
-   caller deadline around its existing session/framing API. Misfin's existing
-   per-step deadlines stay distinct from whole-send policy. Done when each
-   owner's exact-fit/overflow/timeout tests qualify that API; routed Errand
-   evidence cannot close this phase.
+5. Bound standalone DICT/FSP/Kepler/Text bytes and items with configurable native
+   limits and finite defaults on existing helpers. DICT counts raw response
+   bytes and lines across the entire command, including all DEFINE blocks,
+   statuses and terminators; a partial refused reply makes the session unusable.
+   FSP bounds packets, file/list aggregation and directory entries, checks
+   offsets, preserves native directory markers, and retains existing retries
+   and per-reply timing. Kepler/Text bound request, header and body separately;
+   Kepler refuses short declared bodies and leaves following frames unread.
+   Done when supplied-stream and actual TCP/UDP/TLS fixtures cover exact-fit,
+   overflow, early request refusal and native framing, and each crate builds
+   independently as grammar-only, native client and (where available) TLS.
+   Retain compact command/source/lock receipts within the shared 100 MB cap.
+6. Qualify session and mail deadlines separately. DICT, Kepler and Text still
+   need caller-selected operation deadlines; Scorpion needs a caller deadline
+   around its existing session/framing API. Misfin's existing per-step deadlines
+   stay distinct from whole-send policy. Done when the owner's timeout tests
+   qualify each API; size-limit or routed Errand evidence cannot close this phase.
 
 ## Findings (2026-10-22)
 
+- Standalone DICT response accounting must span every definition block and the
+  final status, counting raw bytes before dot unstuffing and every empty line.
+  Announced item counts are metadata rather than allocation sizes. Receive
+  refusal leaves a partial frame, so the session cannot accept another command;
+  local request refusal leaves the healthy session usable.
+- FSP needs a receive sentinel or OS oversize refusal: a truncated UDP packet
+  may otherwise have a valid checksum and masquerade as a complete reply.
+  Datagram/data/extra limits are independent of whole-file and listing limits.
+  Directory padding (`SKIP`) continues at a checked offset; `END` terminates
+  even after entries in the same packet. The old session conflated padding
+  with an empty result and did not retain explicit completion from the parser.
+- Kepler's 1024-byte URI ceiling is distinct from the request's cache/language
+  fields and CRLF. The native request parser previously counted the whole line
+  against that URI ceiling. Kepler/Text's old header counters omitted the
+  final LF; full-wire defaults of 1025/4097 bytes preserve the complete-header
+  acceptance boundaries. Their configurable limits count both CR and LF.
 - `errand/src/lib.rs` routed eight schemes without a common receive budget.
   Gemini and Scroll buffered bodies without a cap; Gopher/Finger were likewise
   unbounded. Suppressing browser progress callbacks did not bound buffering.
@@ -94,6 +120,13 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-22: started the standalone size/framing slice in three native owner
+  lanes: DICT, FSP, and Kepler/Text. Existing command/URI ceilings remain
+  protocol-owned; configurable byte limits include their wire framing. DICT
+  budgets span a complete command, FSP budgets span all datagrams in a file or
+  listing, and stream bodies refuse excess instead of returning prefixes.
+  Session/mail deadlines remain explicitly queued in phase 6.
 
 - 2026-10-22: consumer delivery is complete. Mere source `faa6f1fb3` and
   qualification `ce7b4816f` pass 48 fetch, 75 document and three original V1

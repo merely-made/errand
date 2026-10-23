@@ -36,6 +36,7 @@ tokio-rustls = { version = "0.26", default-features = false, features = [
 ], optional = true }
 
 [dev-dependencies]
+rcgen = "0.13"
 tokio = { version = "1", default-features = false, features = [
     "macros",
     "rt",

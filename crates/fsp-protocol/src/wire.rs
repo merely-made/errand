@@ -155,10 +155,13 @@ impl std::fmt::Display for DecodeError {
             Self::TooShort => write!(f, "packet shorter than a 12-byte header"),
             Self::LengthOverrun { claimed, available } => {
                 write!(f, "data length {claimed} exceeds {available} available")
-            },
+            }
             Self::BadChecksum { expected, found } => {
-                write!(f, "checksum mismatch: expected {expected:#04x}, found {found:#04x}")
-            },
+                write!(
+                    f,
+                    "checksum mismatch: expected {expected:#04x}, found {found:#04x}"
+                )
+            }
         }
     }
 }
@@ -280,8 +283,40 @@ pub struct DirEntry {
 /// end of the block and `RDTYPE_END` stops the walk; a block is never split
 /// across packets, so a short read is the end rather than a continuation.
 pub fn parse_directory(block: &[u8]) -> Vec<DirEntry> {
+    parse_directory_bounded(block, usize::MAX)
+        .expect("entry count cannot exceed usize::MAX")
+        .entries
+}
+
+/// The bounded native walk also distinguishes padding from an explicit END.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DirectoryBlock {
+    pub entries: Vec<DirEntry>,
+    pub finished: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DirectoryLimitExceeded {
+    pub max_entries: usize,
+}
+
+impl std::fmt::Display for DirectoryLimitExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "directory block exceeds {} entries", self.max_entries)
+    }
+}
+impl std::error::Error for DirectoryLimitExceeded {}
+
+/// Parse with an entry budget, checking before name allocation. Unknown kinds,
+/// native padding, verbatim fields and the original lossy UTF-8 name behavior
+/// follow `parse_directory`; `finished` records an explicit END marker.
+pub fn parse_directory_bounded(
+    block: &[u8],
+    max_entries: usize,
+) -> Result<DirectoryBlock, DirectoryLimitExceeded> {
     let mut entries = Vec::new();
     let mut at = 0usize;
+    let mut finished = false;
 
     while at + 9 <= block.len() {
         let time = u32::from_be_bytes([block[at], block[at + 1], block[at + 2], block[at + 3]]);
@@ -289,6 +324,7 @@ pub fn parse_directory(block: &[u8]) -> Vec<DirEntry> {
         let kind_byte = block[at + 8];
 
         if kind_byte == RDTYPE_END {
+            finished = true;
             break;
         }
         if kind_byte == RDTYPE_SKIP {
@@ -301,13 +337,15 @@ pub fn parse_directory(block: &[u8]) -> Vec<DirEntry> {
         let Some(nul) = block[name_start..].iter().position(|b| *b == 0) else {
             break;
         };
-        let name = String::from_utf8_lossy(&block[name_start..name_start + nul]).to_string();
-
         if let Some(kind) = match kind_byte {
             RDTYPE_FILE => Some(EntryKind::File),
             RDTYPE_DIR => Some(EntryKind::Directory),
             _ => None,
         } {
+            if entries.len() == max_entries {
+                return Err(DirectoryLimitExceeded { max_entries });
+            }
+            let name = String::from_utf8_lossy(&block[name_start..name_start + nul]).to_string();
             entries.push(DirEntry {
                 time,
                 size,
@@ -320,7 +358,7 @@ pub fn parse_directory(block: &[u8]) -> Vec<DirEntry> {
         let end = name_start + nul + 1;
         at = end.div_ceil(4) * 4;
     }
-    entries
+    Ok(DirectoryBlock { entries, finished })
 }
 
 #[cfg(test)]
@@ -380,12 +418,18 @@ mod tests {
     fn a_packet_checksummed_one_way_is_refused_the_other() {
         let bytes = encode(&packet(Command::GetDir, b"/pub"), Direction::ClientToServer);
         let error = decode(&bytes, Direction::ServerToClient).unwrap_err();
-        assert!(matches!(error, DecodeError::BadChecksum { .. }), "got {error:?}");
+        assert!(
+            matches!(error, DecodeError::BadChecksum { .. }),
+            "got {error:?}"
+        );
     }
 
     #[test]
     fn a_corrupted_byte_is_caught() {
-        let mut bytes = encode(&packet(Command::GetFile, b"data"), Direction::ServerToClient);
+        let mut bytes = encode(
+            &packet(Command::GetFile, b"data"),
+            Direction::ServerToClient,
+        );
         bytes[HEADER_LEN] ^= 0xFF;
         assert!(matches!(
             decode(&bytes, Direction::ServerToClient),
@@ -395,8 +439,14 @@ mod tests {
 
     #[test]
     fn a_short_packet_is_refused_rather_than_panicking() {
-        assert_eq!(decode(&[0u8; 5], Direction::ServerToClient), Err(DecodeError::TooShort));
-        assert_eq!(decode(&[], Direction::ServerToClient), Err(DecodeError::TooShort));
+        assert_eq!(
+            decode(&[0u8; 5], Direction::ServerToClient),
+            Err(DecodeError::TooShort)
+        );
+        assert_eq!(
+            decode(&[], Direction::ServerToClient),
+            Err(DecodeError::TooShort)
+        );
     }
 
     #[test]
@@ -438,7 +488,11 @@ mod tests {
             assert_eq!(Command::from_code(code).unwrap().code(), code);
         }
         assert_eq!(Command::from_code(0x00), None);
-        assert_eq!(Command::from_code(0x81), None, "extended headers are reserved");
+        assert_eq!(
+            Command::from_code(0x81),
+            None,
+            "extended headers are reserved"
+        );
     }
 
     /// Build a directory entry the way a server would.
@@ -501,5 +555,42 @@ mod tests {
     #[test]
     fn an_empty_block_yields_nothing() {
         assert!(parse_directory(&[]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod limit_tests {
+    use super::*;
+    fn entry(name: &[u8]) -> Vec<u8> {
+        let mut bytes = 123u32.to_be_bytes().to_vec();
+        bytes.extend_from_slice(&999u32.to_be_bytes());
+        bytes.push(RDTYPE_FILE);
+        bytes.extend_from_slice(name);
+        bytes.push(0);
+        bytes.resize(bytes.len().div_ceil(4) * 4, 0);
+        bytes
+    }
+    #[test]
+    fn bounded_directory_walk_keeps_grammar_and_checks_entries_before_copy() {
+        let mut bytes = entry(b"first");
+        bytes.extend(entry(b"\xff"));
+        let mut end = vec![0; 12];
+        end[8] = RDTYPE_END;
+        bytes.extend(end);
+        bytes.extend(entry(b"ignored"));
+        let result = parse_directory_bounded(&bytes, 2).unwrap();
+        assert!(result.finished);
+        assert_eq!(result.entries, parse_directory(&bytes));
+        assert_eq!(result.entries[1].name, "\u{fffd}");
+        assert_eq!(
+            parse_directory_bounded(&bytes, 1),
+            Err(DirectoryLimitExceeded { max_entries: 1 })
+        );
+        let mut skip = vec![0; 12];
+        skip[8] = RDTYPE_SKIP;
+        skip.extend(entry(b"padding"));
+        let result = parse_directory_bounded(&skip, 0).unwrap();
+        assert!(result.entries.is_empty());
+        assert!(!result.finished);
     }
 }

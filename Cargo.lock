@@ -475,6 +475,7 @@ dependencies = [
 name = "kepler-protocol"
 version = "0.1.0"
 dependencies = [
+ "rcgen",
  "rustls",
  "tokio",
  "tokio-rustls",
@@ -974,6 +975,7 @@ dependencies = [
 name = "text-protocol"
 version = "0.1.0"
 dependencies = [
+ "rcgen",
  "rustls",
  "tokio",
  "tokio-rustls",

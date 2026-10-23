@@ -35,6 +35,46 @@ continues** rather than being handed up as an answer to a question nobody
 asked. The client also echoes the server's last key on every request, as the
 spec requires.
 
+## Client limits
+
+`Session::connect_with_limits(host, port, Limits { .. })` selects caller-owned
+budgets; `Session::connect` uses finite defaults. `session.limits()` returns the
+selected snapshot. Request bytes include the 12-byte header and a path's NUL.
+
+| Limit | Default |
+|---|---:|
+| Complete outgoing packet (`max_request_bytes`) | 1036 bytes |
+| Complete incoming datagram (`max_datagram_bytes`) | 2060 bytes |
+| Reply data (`max_data_bytes`) | 2048 bytes |
+| Reply extra area (`max_extra_bytes`) | 2048 bytes, within the datagram cap |
+| Whole file (`max_file_bytes`) | 64 MiB |
+| Directory reply data (`max_directory_bytes`) | 8 MiB |
+| Directory entries (`max_directory_entries`) | 65536 |
+
+Limits are host policy, not new wire constants. In particular, `MAX_PAYLOAD`
+(1024) remains the minimum supported payload and the existing short-block
+completion threshold. A configured client can accept larger blocks. Exact caps
+succeed, including a full final block followed by a separate empty EOF reply;
+overflow returns `ClientError::LimitExceeded`, never a successful prefix.
+File and directory offsets advance with checked 32-bit arithmetic. Advertised
+file sizes remain metadata and do not determine allocations.
+
+Requests are checked before packet/path copies and u16 conversion. Reply
+header/data/extra budgets are checked before decoded vectors are allocated.
+The UDP receive buffer has an extra sentinel byte, bounded by full UDP capacity;
+truncating receives or an OS oversize error cannot masquerade as a valid packet.
+Directory bytes include padding and end markers. Entry admission is checked
+before copying names; `RDTYPE_SKIP` advances to another block and `RDTYPE_END`
+finishes the listing, including when it follows entries in the same packet.
+The dependency-free `parse_directory_bounded` also exposes entries and explicit
+end-marker status; existing `decode` and `parse_directory` retain their grammar
+contracts.
+
+Retries still default to three attempts and `RESEND_AFTER` (one second) for each
+reply. Within the packet budgets, stale or corrupt replies are discarded under
+that same reply deadline.
+These budgets do not introduce a session or whole-operation deadline.
+
 ## Layers
 
 | Layer | Feature | Pulls |

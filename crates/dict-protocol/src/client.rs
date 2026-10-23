@@ -24,8 +24,8 @@
 //! `552 no match` is an answer.
 //!
 
-use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::io::AsyncRead;
+use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
 use crate::wire::{
@@ -40,7 +40,10 @@ pub enum ClientError {
     /// The server said something the grammar does not allow.
     Protocol(String),
     /// The server refused, with its own code and message.
-    Refused { code: u16, text: String },
+    Refused {
+        code: u16,
+        text: String,
+    },
 }
 
 impl std::fmt::Display for ClientError {
@@ -56,20 +59,82 @@ impl std::fmt::Display for ClientError {
 
 impl std::error::Error for ClientError {}
 
+/// Finite budgets for a banner or one complete high-level command response.
+///
+/// Bytes count the wire representation, including CRLF, status lines, text
+/// terminators and trailers, before dot unstuffing. Every inbound line counts,
+/// including empty lines, so this also bounds the number of returned items.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Limits {
+    /// Outgoing command bytes, including CRLF; [`MAX_LINE`] also applies.
+    pub max_command_bytes: usize,
+    /// Bytes in any single inbound line, including CRLF.
+    pub max_line_bytes: usize,
+    /// Total inbound bytes across the entire command response.
+    pub max_response_bytes: usize,
+    /// Total inbound lines across the entire command response.
+    pub max_response_lines: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_command_bytes: MAX_LINE,
+            max_line_bytes: 4096,
+            max_response_bytes: 64 * 1024 * 1024,
+            max_response_lines: 65_536,
+        }
+    }
+}
+
+impl Limits {
+    fn validate(self) -> Result<(), ClientError> {
+        if self.max_command_bytes < 2
+            || self.max_line_bytes == 0
+            || self.max_response_bytes == 0
+            || self.max_response_lines == 0
+        {
+            return Err(ClientError::Protocol(
+                "invalid zero or undersized limits".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct Budget {
+    bytes: usize,
+    lines: usize,
+}
+
 /// An open DICT session.
 pub struct Session<S> {
     stream: BufReader<S>,
     banner: Status,
+    limits: Limits,
+    budget: Budget,
+    unusable: bool,
 }
 
 impl Session<TcpStream> {
     /// Connect to a DICT server and read its banner.
     pub async fn connect(host: &str, port: Option<u16>) -> Result<Self, ClientError> {
+        Self::connect_with_limits(host, port, Limits::default()).await
+    }
+
+    /// Connect using explicit byte and line budgets. No deadline is imposed.
+    pub async fn connect_with_limits(
+        host: &str,
+        port: Option<u16>,
+        limits: Limits,
+    ) -> Result<Self, ClientError> {
+        limits.validate()?;
         let port = port.unwrap_or(DEFAULT_PORT);
         let stream = TcpStream::connect((host, port))
             .await
             .map_err(|e| ClientError::Connect(format!("tcp {host}:{port}: {e}")))?;
-        Self::over(stream).await
+        Self::over_with_limits(stream, limits).await
     }
 }
 
@@ -82,15 +147,31 @@ where
     /// Transport-independent, so DICT rides an encrypted carrier as readily as
     /// TCP.
     pub async fn over(stream: S) -> Result<Self, ClientError> {
+        Self::over_with_limits(stream, Limits::default()).await
+    }
+
+    /// Start a session with explicit limits, also applied to the banner.
+    ///
+    /// A receive failure leaves the session unusable: a partial response is
+    /// never drained without a budget. Request preflight failures do not do so.
+    /// Hosts own whole-operation deadlines and cancellation.
+    pub async fn over_with_limits(stream: S, limits: Limits) -> Result<Self, ClientError> {
+        limits.validate()?;
         let mut stream = BufReader::new(stream);
-        let banner = read_status(&mut stream).await?;
+        let banner = read_status(&mut stream, limits, &mut Budget::default()).await?;
         if banner.code != wire::BANNER {
             return Err(ClientError::Protocol(format!(
                 "expected a 220 banner, got {} {}",
                 banner.code, banner.text
             )));
         }
-        Ok(Self { stream, banner })
+        Ok(Self {
+            stream,
+            banner,
+            limits,
+            budget: Budget::default(),
+            unusable: false,
+        })
     }
 
     /// The server's greeting, which carries its capabilities and message id.
@@ -110,7 +191,7 @@ where
                 let databases = wire::parse_databases(&lines);
                 self.expect_ok().await?;
                 Ok(databases)
-            },
+            }
             554 => Ok(Vec::new()),
             _ => Err(refused(status)),
         }
@@ -125,7 +206,7 @@ where
                 let strategies = wire::parse_databases(&lines);
                 self.expect_ok().await?;
                 Ok(strategies)
-            },
+            }
             555 => Ok(Vec::new()),
             _ => Err(refused(status)),
         }
@@ -141,11 +222,10 @@ where
         database: &str,
         word: &str,
     ) -> Result<Vec<Definition>, ClientError> {
-        let status = self
-            .command(&format!("DEFINE {} {}", quote(database), quote(word)))
-            .await?;
+        let line = self.parameter_command("DEFINE", &[database, word])?;
+        let status = self.command(&line).await?;
         match status.code {
-            wire::DEFINITIONS_FOLLOW => {},
+            wire::DEFINITIONS_FOLLOW => {}
             wire::NO_MATCH => return Ok(Vec::new()),
             _ => return Err(refused(status)),
         }
@@ -153,20 +233,25 @@ where
         // Then one 151-plus-text-block per definition, ending with a 250.
         let mut definitions = Vec::new();
         loop {
-            let status = read_status(&mut self.stream).await?;
+            let status = self.read_status().await?;
             match status.code {
                 wire::DEFINITION_FOLLOWS => {
-                    let (word, database, database_description) =
-                        parse_definition_header(&status).ok_or_else(|| {
-                            ClientError::Protocol(format!("malformed 151: {}", status.text))
-                        })?;
+                    let Some((word, database, database_description)) =
+                        parse_definition_header(&status)
+                    else {
+                        self.unusable = true;
+                        return Err(ClientError::Protocol(format!(
+                            "malformed 151: {}",
+                            status.text
+                        )));
+                    };
                     definitions.push(Definition {
                         word,
                         database,
                         database_description,
                         text: self.read_text_block().await?,
                     });
-                },
+                }
                 code if (200..300).contains(&code) => return Ok(definitions),
                 _ => return Err(refused(status)),
             }
@@ -180,21 +265,15 @@ where
         strategy: &str,
         word: &str,
     ) -> Result<Vec<Match>, ClientError> {
-        let status = self
-            .command(&format!(
-                "MATCH {} {} {}",
-                quote(database),
-                quote(strategy),
-                quote(word)
-            ))
-            .await?;
+        let line = self.parameter_command("MATCH", &[database, strategy, word])?;
+        let status = self.command(&line).await?;
         match status.code {
             wire::MATCHES_FOLLOW => {
                 let lines = self.read_text_block().await?;
                 let matches = wire::parse_matches(&lines);
                 self.expect_ok().await?;
                 Ok(matches)
-            },
+            }
             wire::NO_MATCH => Ok(Vec::new()),
             _ => Err(refused(status)),
         }
@@ -202,6 +281,7 @@ where
 
     /// `CLIENT text`: announce who is calling. Servers log it; none require it.
     pub async fn announce(&mut self, text: &str) -> Result<(), ClientError> {
+        self.check_command_parts(&["CLIENT ", text])?;
         let status = self.command(&format!("CLIENT {text}")).await?;
         if status.is_success() {
             Ok(())
@@ -220,26 +300,85 @@ where
         }
     }
 
-    /// Send a command line and read its status response.
+    /// Send a command line and read its initial status response.
+    ///
+    /// This low-level method does not consume text blocks or later statuses.
+    /// Use the high-level methods for complete, jointly budgeted responses.
     pub async fn command(&mut self, line: &str) -> Result<Status, ClientError> {
-        if line.len() + 2 > MAX_LINE {
-            return Err(ClientError::Protocol(format!(
-                "command exceeds {MAX_LINE} bytes"
-            )));
+        self.check_command_parts(&[line])?;
+        if self.unusable {
+            return Err(ClientError::Protocol(
+                "session is unusable after a receive or write failure".into(),
+            ));
         }
-        self.stream
-            .get_mut()
-            .write_all(format!("{line}\r\n").as_bytes())
-            .await
-            .map_err(|e| ClientError::Io(e.to_string()))?;
-        read_status(&mut self.stream).await
+        self.budget = Budget::default();
+        let write = async {
+            self.stream.get_mut().write_all(line.as_bytes()).await?;
+            self.stream.get_mut().write_all(b"\r\n").await
+        }
+        .await;
+        if let Err(error) = write {
+            self.unusable = true;
+            return Err(ClientError::Io(error.to_string()));
+        }
+        self.read_status().await
+    }
+
+    fn check_command_parts(&self, parts: &[&str]) -> Result<(), ClientError> {
+        let cap = self.limits.max_command_bytes.min(MAX_LINE);
+        let mut bytes = 2usize;
+        for part in parts {
+            if part.contains(['\r', '\n']) {
+                return Err(ClientError::Protocol("command contains CR or LF".into()));
+            }
+            bytes = bytes
+                .checked_add(part.len())
+                .filter(|&n| n <= cap)
+                .ok_or_else(|| ClientError::Protocol(format!("command exceeds {cap} bytes")))?;
+        }
+        Ok(())
+    }
+
+    fn parameter_command(&self, verb: &str, params: &[&str]) -> Result<String, ClientError> {
+        // Check escaped lengths before constructing quoted caller input.
+        let cap = self.limits.max_command_bytes.min(MAX_LINE);
+        let mut bytes = verb.len() + 2;
+        for param in params {
+            if param.contains(['\r', '\n']) {
+                return Err(ClientError::Protocol("parameter contains CR or LF".into()));
+            }
+            bytes = bytes
+                .checked_add(1)
+                .and_then(|n| n.checked_add(quoted_len(param)))
+                .filter(|&n| n <= cap)
+                .ok_or_else(|| ClientError::Protocol(format!("command exceeds {cap} bytes")))?;
+        }
+        let mut line = String::with_capacity(bytes - 2);
+        line.push_str(verb);
+        for param in params {
+            line.push(' ');
+            line.push_str(&quote(param));
+        }
+        Ok(line)
+    }
+
+    async fn read_status(&mut self) -> Result<Status, ClientError> {
+        let result = read_status(&mut self.stream, self.limits, &mut self.budget).await;
+        if result.is_err() {
+            self.unusable = true;
+        }
+        result
     }
 
     /// Read a dot-terminated text block, unstuffing as it goes.
     async fn read_text_block(&mut self) -> Result<Vec<String>, ClientError> {
         let mut lines = Vec::new();
         loop {
-            let line = read_line(&mut self.stream).await?;
+            let result = read_line(&mut self.stream, self.limits, &mut self.budget).await;
+            if result.is_err() {
+                self.unusable = true;
+            }
+            let line = result?;
             if wire::is_terminator(&line) {
                 return Ok(lines);
             }
@@ -249,7 +388,7 @@ where
 
     /// Consume the `250 ok` that closes a text-block command.
     async fn expect_ok(&mut self) -> Result<(), ClientError> {
-        let status = read_status(&mut self.stream).await?;
+        let status = self.read_status().await?;
         if status.is_success() {
             Ok(())
         } else {
@@ -274,29 +413,77 @@ fn quote(param: &str) -> String {
     }
 }
 
-async fn read_line<S>(stream: &mut BufReader<S>) -> Result<String, ClientError>
-where
-    S: AsyncRead + Unpin,
-{
-    let mut line = String::new();
-    let read = stream
-        .read_line(&mut line)
-        .await
-        .map_err(|e| ClientError::Io(e.to_string()))?;
-    if read == 0 {
-        return Err(ClientError::Protocol("server closed mid-response".into()));
+fn quoted_len(param: &str) -> usize {
+    if param.is_empty() || param.contains(|c: char| c.is_whitespace() || c == '"') {
+        param
+            .len()
+            .saturating_add(2)
+            .saturating_add(param.bytes().filter(|&b| b == b'\\' || b == b'"').count())
+    } else {
+        param.len()
     }
-    Ok(line)
 }
 
-async fn read_status<S>(stream: &mut BufReader<S>) -> Result<Status, ClientError>
+async fn read_line<S>(
+    stream: &mut BufReader<S>,
+    limits: Limits,
+    budget: &mut Budget,
+) -> Result<String, ClientError>
 where
     S: AsyncRead + Unpin,
 {
-    let line = read_line(stream).await?;
+    if budget.lines >= limits.max_response_lines {
+        return Err(ClientError::Protocol("response line limit exceeded".into()));
+    }
+    let mut line = Vec::new();
+    loop {
+        let available = stream
+            .fill_buf()
+            .await
+            .map_err(|e| ClientError::Io(e.to_string()))?;
+        if available.is_empty() {
+            return Err(ClientError::Protocol("server closed mid-response".into()));
+        }
+        let newline = available.iter().position(|&b| b == b'\n');
+        let take = newline.map_or(available.len(), |index| index + 1);
+        if take > limits.max_line_bytes - line.len() {
+            return Err(ClientError::Protocol(
+                "response line byte limit exceeded".into(),
+            ));
+        }
+        if take > limits.max_response_bytes - budget.bytes {
+            return Err(ClientError::Protocol("response byte limit exceeded".into()));
+        }
+        line.extend_from_slice(&available[..take]);
+        budget.bytes += take;
+        stream.consume(take);
+        if newline.is_some() {
+            if !line.ends_with(b"\r\n") {
+                return Err(ClientError::Protocol("response line lacks CRLF".into()));
+            }
+            budget.lines += 1;
+            return String::from_utf8(line)
+                .map_err(|e| ClientError::Protocol(format!("response is not UTF-8: {e}")));
+        }
+    }
+}
+
+async fn read_status<S>(
+    stream: &mut BufReader<S>,
+    limits: Limits,
+    budget: &mut Budget,
+) -> Result<Status, ClientError>
+where
+    S: AsyncRead + Unpin,
+{
+    let line = read_line(stream, limits, budget).await?;
     wire::parse_status(&line)
         .ok_or_else(|| ClientError::Protocol(format!("not a status line: {line:?}")))
 }
+
+#[cfg(test)]
+#[path = "client_limits_tests.rs"]
+mod limits_tests;
 
 #[cfg(test)]
 mod tests {

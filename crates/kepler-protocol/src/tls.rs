@@ -15,12 +15,13 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
-use crate::client::{ClientError, Response, exchange};
+use crate::client::{ClientError, Limits, Response, exchange_with_limits};
 
 pub(crate) async fn exchange_tls(
     host: &str,
     port: u16,
     request: &[u8],
+    limits: &Limits,
 ) -> Result<Response, ClientError> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let config = rustls::ClientConfig::builder_with_provider(provider)
@@ -40,7 +41,7 @@ pub(crate) async fn exchange_tls(
         .await
         .map_err(|e| ClientError::Connect(format!("tls handshake: {e}")))?;
 
-    exchange(stream, request).await
+    exchange_with_limits(stream, request, limits).await
 }
 
 /// Accepts any certificate. See the module note: this is confidentiality

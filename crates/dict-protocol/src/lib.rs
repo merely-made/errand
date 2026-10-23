@@ -45,4 +45,4 @@ pub use wire::{
 };
 
 #[cfg(feature = "client")]
-pub use client::{ClientError, Session};
+pub use client::{ClientError, Limits, Session};

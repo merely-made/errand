@@ -42,6 +42,34 @@ session.quit().await?;
 that is absent yields an **empty vector rather than an error**, because
 `552 no match` is an answer.
 
+## Client limits
+
+`Session::connect_with_limits(host, port, limits)` and
+`Session::over_with_limits(stream, limits)` accept a `Limits` value. Existing
+constructors use finite defaults:
+
+| Field | Default | Counted representation |
+|---|---:|---|
+| `max_command_bytes` | 1024 | Complete outgoing command, including CRLF; the native `MAX_LINE` ceiling always applies |
+| `max_line_bytes` | 4096 | One inbound line, including CRLF |
+| `max_response_bytes` | 64 MiB | All inbound bytes for a complete operation |
+| `max_response_lines` | 65536 | All inbound lines for a complete operation |
+
+Response totals include statuses, text, empty lines, dot terminators and the
+final trailer, before dot unstuffing. `DEFINE` shares one budget across all
+definitions. The line budget also bounds returned items and definitions;
+announced server counts never determine allocation. The greeting has its own
+budget, and a new command starts a fresh response budget. Byte and line budgets
+are not exact heap-memory accounting: parsed strings and result containers also
+occupy memory.
+
+Commands containing CR or LF are refused before writing. Request preflight
+failures leave the session usable. A receive or write failure leaves it unusable
+for further commands; partial replies are never drained without a budget.
+`Session::command` only reads the initial status, so use the high-level methods
+for complete response handling. Hosts remain responsible for operation deadlines
+and for discarding sessions after cancelling an operation.
+
 ## Layers
 
 | Layer | Feature | Pulls |

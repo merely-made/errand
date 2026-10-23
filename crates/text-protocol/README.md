@@ -39,6 +39,24 @@ TLS is confidentiality, not peer authentication.
 The grammar is dependency-free (`default-features = false`), and `exchange`
 runs over any stream, so an already-encrypted carrier needs no TLS of its own.
 
+## Client size limits
+
+`Limits` configures `max_request_bytes`, `max_header_line_bytes`, and
+`max_body_bytes`. Use `fetch_with_limits(iri, &limits)`,
+`fetch_tls_with_limits(iri, &limits)`, or
+`exchange_with_limits(iri, stream, &limits)`. Existing helpers delegate to
+finite defaults: 4096 request bytes, 4097 response-header bytes, and 64 MiB
+of body. Line budgets include CRLF. The 4097-byte header default preserves
+the old 4096-byte counter, which omitted the final LF.
+
+Constructed requests reject CR/LF injection and are bounded before connecting
+or writing. Headers require CRLF. Header and body overflow returns
+`ClientError::Limit`, never a successful prefix; unknown-length bodies read
+only a bounded overflow probe before refusing. Zero request/header budgets
+refuse, while a zero body budget permits an empty success. Status and MIME
+metadata retain their existing representation. Callers own session deadlines
+and cancellation; this API adds no timers.
+
 ## License
 
 MIT.

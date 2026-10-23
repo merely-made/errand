@@ -108,7 +108,7 @@ impl Header {
         match self {
             Self::Success { code, .. } | Self::Unchanged { code, .. } | Self::Meta { code, .. } => {
                 *code
-            },
+            }
         }
     }
 
@@ -160,19 +160,22 @@ pub struct Request {
 /// Parse a request line, which is what a server does.
 pub fn parse_request(line: &str) -> Result<Request, MalformedHeader> {
     let line = line.trim_end_matches(['\r', '\n']);
-    if line.len() > MAX_URI {
-        return Err(MalformedHeader(format!("request exceeds {MAX_URI} bytes")));
-    }
     let mut fields = line.split(' ');
     let uri = fields
         .next()
         .filter(|u| !u.is_empty())
         .ok_or_else(|| MalformedHeader(line.to_string()))?;
+    if uri.len() > MAX_URI {
+        return Err(MalformedHeader(format!("URI exceeds {MAX_URI} bytes")));
+    }
     // Both trailing fields are optional in practice; a bare URI is still a
     // request, so default rather than refuse.
     let last_cached = fields
         .next()
-        .map(|t| t.parse::<i64>().map_err(|_| MalformedHeader(line.to_string())))
+        .map(|t| {
+            t.parse::<i64>()
+                .map_err(|_| MalformedHeader(line.to_string()))
+        })
         .transpose()?
         .unwrap_or(0);
     let language = fields.next().unwrap_or("").to_string();
@@ -221,7 +224,11 @@ pub fn parse_header(line: &str) -> Result<Header, MalformedHeader> {
             // length, last_updated, expires, then the MIME type.
             let mut fields = rest.splitn(4, ' ');
             let mut number = || -> Result<i64, MalformedHeader> {
-                fields.next().ok_or_else(bad)?.parse::<i64>().map_err(|_| bad())
+                fields
+                    .next()
+                    .ok_or_else(bad)?
+                    .parse::<i64>()
+                    .map_err(|_| bad())
             };
             let length = number()?;
             let last_updated = number()?;
@@ -239,14 +246,14 @@ pub fn parse_header(line: &str) -> Result<Header, MalformedHeader> {
                 },
                 mimetype,
             })
-        },
+        }
         Status::Unchanged => {
             let expires = rest.split(' ').next().ok_or_else(bad)?;
             Ok(Header::Unchanged {
                 code,
                 expires: expires.parse::<i64>().map_err(|_| bad())?,
             })
-        },
+        }
         _ => Ok(Header::Meta {
             code,
             status,
@@ -273,7 +280,7 @@ pub fn format_header(header: &Header) -> String {
             } else {
                 format!("{code} {meta}\r\n")
             }
-        },
+        }
     }
 }
 
@@ -404,6 +411,15 @@ mod tests {
     fn an_over_long_request_is_refused_at_the_specifications_cap() {
         let long = format!("kepler://example.net/{}", "x".repeat(MAX_URI));
         assert!(parse_request(&long).is_err());
+    }
+
+    #[test]
+    fn uri_ceiling_excludes_cache_language_and_crlf() {
+        let uri = format!("kepler://x/{}", "x".repeat(MAX_URI - "kepler://x/".len()));
+        let line = request_line(&uri, i64::MIN, "en-GB,en;q=0.8");
+        assert!(line.len() > MAX_URI);
+        assert_eq!(parse_request(&line).unwrap().uri.len(), MAX_URI);
+        assert!(parse_request(&request_line(&(uri + "x"), 0, "en")).is_err());
     }
 
     #[test]

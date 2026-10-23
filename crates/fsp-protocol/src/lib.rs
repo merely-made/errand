@@ -43,9 +43,10 @@ pub mod wire;
 pub mod client;
 
 pub use wire::{
-    Command, DEFAULT_PORT, DecodeError, DirEntry, Direction, EntryKind, HEADER_LEN, Header,
-    MAX_PAYLOAD, Packet, checksum, decode, encode, parse_directory,
+    Command, DEFAULT_PORT, DecodeError, DirEntry, Direction, DirectoryBlock,
+    DirectoryLimitExceeded, EntryKind, HEADER_LEN, Header, MAX_PAYLOAD, Packet, checksum, decode,
+    encode, parse_directory, parse_directory_bounded,
 };
 
 #[cfg(feature = "client")]
-pub use client::{ClientError, Session};
+pub use client::{ClientError, Limits, Session};

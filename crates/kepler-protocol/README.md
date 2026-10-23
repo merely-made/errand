@@ -36,6 +36,30 @@ protocol's.
 kepler-protocol = { version = "0.1", default-features = false }  # grammar only
 ```
 
+## Client size limits
+
+`Limits` configures `max_request_bytes`, `max_header_line_bytes`, and
+`max_body_bytes`. Use `fetch_with_limits(url, last_cached, language, &limits)`
+or `exchange_with_limits(stream, request, &limits)`; the existing helpers
+choose finite defaults. The same fetch options reach `keplers://` TLS.
+
+Defaults are 4096 request bytes, 1025 response-header bytes, and 64 MiB of
+body. Line budgets include CRLF. The 1025-byte header default preserves the
+previous 1024-byte counter, which counted CR but omitted the final LF.
+Kepler's separate 1024-byte URI ceiling remains enforced even when a caller
+raises the full request allowance for cache and language fields.
+
+Requests are checked before connecting, and constructed fields reject CR/LF
+injection. Raw `exchange` requests remain caller-supplied wire bytes. Zero
+request/header budgets refuse; a zero body budget permits an empty body.
+Headers require CRLF. Oversized headers and bodies return `ClientError::Limit`
+instead of a successful prefix. Declared body lengths are checked before
+reading body bytes; short EOF is a protocol error, and the exact declared
+frame is read without consuming following bytes. Unknown lengths use a
+bounded overflow probe. Cache, timestamp, language, MIME and status data keep
+their existing representations. These are size/framing controls; callers
+still own deadlines and cancellation.
+
 ## Known gaps
 
 **No server.** The client and the grammar are here; serving is additive and

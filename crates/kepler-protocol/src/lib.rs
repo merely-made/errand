@@ -59,4 +59,10 @@ pub use wire::{
 };
 
 #[cfg(feature = "client")]
-pub use client::{ClientError, DEFAULT_PORT, DEFAULT_TLS_PORT, Response, exchange, fetch};
+pub use client::{
+    ClientError, DEFAULT_PORT, DEFAULT_TLS_PORT, Limits, Response, exchange, exchange_with_limits,
+    fetch, fetch_with_limits,
+};
+
+#[cfg(all(test, feature = "client"))]
+mod limits_tests;
