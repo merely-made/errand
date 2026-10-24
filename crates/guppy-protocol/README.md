@@ -1,8 +1,7 @@
 # guppy-protocol
 
-> **Home:** [`merely-made/genet`](https://github.com/merely-made/genet), at
-> `components/errand/protocols/guppy-protocol` (adopted 2026-07). The former standalone repository is archived
-> and links here.
+> **Home:** [`merely-made/errand`](https://github.com/merely-made/errand), at
+> `crates/guppy-protocol` in the continuing Smolweb repository.
 
 
 A Rust implementation of the
@@ -39,6 +38,22 @@ Serving is a `Handler` (any async closure) returning the same
 `GuppyResponse`; the server owns chunking, the send window, retransmission,
 session tracking, and duplicate-request suppression. `FileHandler` is the
 built-in static-directory handler.
+
+## Server shutdown
+
+`serve` keeps one inline UDP engine. Its shutdown future now guards the entire
+engine, including a pending handler and all initial, ACK-driven, special-reply
+and retransmission sends. When stop is observed, that owned future, its current
+handler, session table and socket are dropped before `serve` returns. No peer
+tasks are detached, and outstanding ACKs are not drained. Stopping adds no
+protocol packet or grace period.
+
+Cancellation is cooperative: synchronous work or a non-yielding future cannot
+be preempted, and handler effects or datagrams already sent cannot be recalled.
+The outer stop check cannot run partway through one engine poll. Existing
+session cap, window/ACK rules, retransmission timing,
+creation-based timeout, completed-session linger and zero-window behavior remain
+unchanged. Scroll and Scorpion retain their separate caller-owned exchanges.
 
 ## CLI
 

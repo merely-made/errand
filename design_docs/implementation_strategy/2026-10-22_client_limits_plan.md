@@ -9,6 +9,8 @@ Whole-transaction, step, connection-count and shutdown-grace policies remain
 independently configurable. Each protocol's native timing and request semantics
 remain distinct. Guppy inline responsiveness and caller-owned Scroll/Scorpion
 exchanges retain separate lifecycle contracts.
+Phase 11, Guppy's inline UDP shutdown responsiveness, is in progress. Scroll
+and Scorpion caller-owned exchanges remain outside this slice.
 
 ## Ownership and scope
 
@@ -154,10 +156,44 @@ receipts. New receipt hashes must state their Git/native byte convention.
     Use bounded Luna owner lanes and the shared 100 MB evidence cap, with both
     stable Cargo target/build variables explicitly set for locked/offline gates.
 
+11. Make Guppy shutdown responsive across its complete inline UDP engine.
+    Place the owned session table/socket/current handler and every initial,
+    special-response, ACK-window and retransmit send await under one
+    shutdown-prioritized cancellation boundary. Preserve the single inline
+    handler, source-address sessions, packet/ACK/window behavior, retransmission,
+    creation-based expiry, completed linger and capacity controls. Stop discards
+    the engine and releases owned state before returning, as the old between-
+    iterations stop did; it does not add tasks, a TCP grace policy, a shutdown
+    packet or wait for outstanding ACKs. Synchronous or continuously-ready work
+    is still cooperative, and emitted datagrams/effects cannot be undone.
+    Done when pending-handler/native-load and deterministic pending-I/O controls
+    qualify cancellation/drop, real UDP regressions preserve sessions and wire
+    bytes, unchanged helper/branch comparisons and independent Guppy/Errand
+    feature/Clippy gates qualify exact source/lock receipts. Keep Scroll and
+    Scorpion caller-owned exchanges, client behavior, config/defaults and other
+    protocol lifecycle policies unchanged. Shared evidence cap remains 100 MB.
+
 ## Findings
 
 ### 2026-10-23
 
+- Guppy's old select checked stop only between receive/tick iterations. A
+  handler, malformed/special reply, initial window, ACK-driven window or
+  retransmission could await inside the selected branch while stop went
+  unpolled. Guard the whole owned engine, rather than adding per-peer tasks or
+  changing its UDP state machine. One engine poll can process multiple ready
+  operations; the outer stop branch is re-polled after the engine yields, so
+  this is not a per-datagram hard-preemption guarantee.
+- Guppy retains `std::time::Instant` for existing session timing. Expiry is
+  based on session creation, with a five-second completed-session linger;
+  duplicate/unknown in-session ACKs retain their existing `last_send` behavior.
+  Window zero remains a silent live session. The native helpers and loop branch
+  bodies are preserved, including ignored send errors and session-cap checks.
+- A deterministic pending AsyncWrite test qualifies cancellation of the same
+  outer future guard; it does not claim native UDP kernel-send backpressure.
+  Actual UDP fixtures qualify window/ACK/retransmit, timeout/linger/cap, pending
+  handler cancellation and sustained input. Previously emitted datagrams may
+  remain queued after shutdown and cannot be recalled.
 - The five TCP sibling listeners expose different native timing: Gemini times
   TLS and reads; Gopher/Finger time read operations; Nex times reads and reply
   writes; Spartan additionally times a declared upload body. Handler execution
@@ -304,6 +340,14 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: started phase 11 in Guppy only. Root owns production/tests/docs and
+  Cargo gates, with a bounded Luna read-only protocol/cancellation review.
+  Required receipts are actual UDP session/shutdown results, controlled pending
+  I/O and drop behavior, exact native-helper/branch comparison, feature/Clippy
+  checks and source/lock identities. Retain compact summaries within the shared
+  100 MB cap, reuse the stable smolweb target/build directory and preserve prior
+  evidence/cache. No new actor/task runtime, product pin or exchange policy.
 
 - 2026-10-23: source `7b7a9bfd` completes phase 10. The full supplier cohort
   passes 313 unit tests, 14 integration tests and 13 doctests, including Errand

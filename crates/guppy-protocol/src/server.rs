@@ -96,20 +96,43 @@ const DONE_LINGER: Duration = Duration::from_secs(5);
 ///
 /// The handler runs inline on the receive loop (guppy serves small documents;
 /// a handler that must do slow work should do it elsewhere and answer fast).
+/// Shutdown cancels the entire owned loop, including a pending handler or
+/// datagram send. It discards sessions and releases the owned socket before
+/// returning; it does not drain outstanding acknowledgements or send a shutdown
+/// packet. Cancellation is cooperative and cannot preempt synchronous work or
+/// undo handler side effects already performed. No background tasks are spawned.
 pub async fn serve(
     socket: UdpSocket,
     handler: impl Handler,
     config: ServerConfig,
     shutdown: impl Future<Output = ()>,
 ) -> std::io::Result<()> {
+    run_until_shutdown(serve_loop(socket, handler, config), shutdown).await
+}
+
+// Guard the complete inline engine rather than only its next receive/tick.
+// One cancellation boundary therefore covers every handler and send await.
+async fn run_until_shutdown(
+    operation: impl Future<Output = std::io::Result<()>>,
+    shutdown: impl Future<Output = ()>,
+) -> std::io::Result<()> {
+    tokio::select! {
+        biased;
+        _ = shutdown => Ok(()),
+        result = operation => result,
+    }
+}
+
+async fn serve_loop(
+    socket: UdpSocket,
+    handler: impl Handler,
+    config: ServerConfig,
+) -> std::io::Result<()> {
     let mut sessions: HashMap<SocketAddr, Session> = HashMap::new();
     let mut buffer = vec![0u8; 65_536];
     let mut tick = tokio::time::interval(config.retransmit_after / 2);
-    tokio::pin!(shutdown);
-
     loop {
         tokio::select! {
-            _ = &mut shutdown => break,
             _ = tick.tick() => {
                 let now = Instant::now();
                 sessions.retain(|_, session| {
@@ -187,7 +210,6 @@ pub async fn serve(
             }
         }
     }
-    Ok(())
 }
 
 fn parse_request(line: &str, peer: SocketAddr) -> Option<Request> {
@@ -382,6 +404,10 @@ impl Handler for FileHandler {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "server_shutdown_tests.rs"]
+mod server_shutdown_tests;
 
 #[cfg(test)]
 mod tests {

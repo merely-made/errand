@@ -5,4 +5,4 @@ Preserve host-owned authority, existing formats and independent crate feature bo
 Canonical migration and current receipts: `mere/design_docs/mere_docs/implementation_strategy/2026-10-19_family_promotion_plan.md`.
 
 - [Native Scroll response and connection exchange](implementation_strategy/2026-10-21_native_scroll_server_plan.md): bounded native reply encoding and an optional host-owned stream exchange, with Knot as the existing consumer.
-- [Client receive limits](implementation_strategy/2026-10-22_client_limits_plan.md): routed/native limits and all six native TCP listener lifecycles are qualified; protocol timing remains distinct, with Guppy and caller-owned exchanges separately scoped.
+- [Client receive limits](implementation_strategy/2026-10-22_client_limits_plan.md): routed/native limits and six TCP listener lifecycles are qualified; Guppy inline shutdown responsiveness is in progress, with caller-owned exchanges separately scoped.
