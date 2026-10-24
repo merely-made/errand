@@ -1,0 +1,49 @@
+{
+  "schema": "tcp-listener-lifecycle-preliminary-v1",
+  "date": "2026-10-23",
+  "qualified": false,
+  "base_source": "d605afecf405862a5025ee4a048bcf6f1ed78463",
+  "environment": {
+    "CARGO_TARGET_DIR": "C:\\t\\cargo-targets\\smolweb",
+    "CARGO_BUILD_BUILD_DIR": "C:\\t\\cargo-targets\\smolweb\\build"
+  },
+  "code_review_repairs": [
+    "Gemini fixture uses rcgen0.13 CertifiedKey.key_pair and cloneable one-shot gates for its Fn + Sync handler; corrected before Cargo.",
+    "Restore pre-existing native line wrapping instead of formatting protocol implementation during lifecycle work."
+  ],
+  "first_focused_compile": {
+    "command": "cargo test -p gemini-protocol -p gopher-protocol -p finger-protocol -p nex-protocol -p spartan-protocol --all-features --locked --offline server_lifecycle_tests --quiet",
+    "exit_code": 101,
+    "diagnostics": [
+      "E0583 nex/src/server.rs:369 and spartan/src/server.rs:464: sibling lifecycle test files require explicit path attributes.",
+      "E0282 gopher lifecycle test:86 and finger lifecycle test:84,158: field-accessing handler closure needs explicit native Request type."
+    ],
+    "remedy": "Add sibling test module paths and explicit Request annotations; no native processing changes."
+  },
+  "second_focused_attempt": {
+    "command": "cargo test -p gemini-protocol -p gopher-protocol -p finger-protocol -p nex-protocol -p spartan-protocol --all-features --locked --offline server_lifecycle_tests --quiet",
+    "exit_code": 101,
+    "observed_results": {
+      "gemini_passed": 8,
+      "nex_passed": 6,
+      "nex_failed": 1,
+      "finger_selected": 0,
+      "gopher_selected": 0
+    },
+    "failed_case": "nex server_lifecycle_tests::drain_uses_one_fixed_deadline_and_reaps_panics_and_cancellations",
+    "cause": "The fixture expected draining to continue after its sole waiting child completed at4s. With only that child and an already-reaped panic, early return is correct.",
+    "remedy": "Add a known-started pending child and exact5s elapsed assertion in Nex and the identical Spartan fixture. Use lifecycle_tests as the focused filter because Gopher/Finger use that module alias. Strengthen startup barriers in controlled tests.",
+    "nex_failed_tests_sha256": "b78b20cbffe2b1a6118f29b10f0da92405743da9ea796b7c1d47a04ba49e583c",
+    "spartan_proactively_repaired_tests_sha256": "c9d10d8bee2617763cce20327c25dc767c93c542ab26a22b4f9d35f73147ed2e"
+  },
+  "strict_clippy_attempt": {
+    "command": "cargo clippy -p gemini-protocol -p gopher-protocol -p finger-protocol -p nex-protocol -p spartan-protocol --all-features --all-targets --locked --offline --quiet --no-deps --message-format=json -- -D warnings",
+    "exit_code": 101,
+    "diagnostic": "23 field_reassign_with_default diagnostics in new test code: Nex5, Spartan4, Gopher7, Finger7.",
+    "remedy": "Use ServerConfig struct update initializers; no lint suppression or production policy change. Final strict gate is recorded separately."
+  },
+  "formatting": "Whole-file rustfmt check reports three unchanged baseline wraps: Gemini oversized-reply call and existing assertion, Gopher parse_request search-field chain. Preserve those native/baseline lines. Eight other changed Rust files pass directly; final receipt records the qualified formatting boundary.",
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "retained": "Compact JSON only, no full logs or copied executables. Agents ran no Cargo; all root gates used locked/offline and both approved directory variables. Previous evidence/cache preserved.",
+  "byte_convention": "UTF-8 LF JSON and attributes under -text. Source hashes identify native Windows bytes. Final source qualification is separate."
+}

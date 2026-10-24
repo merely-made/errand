@@ -43,6 +43,15 @@ let listener = tokio::net::TcpListener::bind("0.0.0.0:300").await?;
 serve(listener, FileHandler::new("/srv/spartan"), ServerConfig::default(), shutdown).await?;
 ```
 
+`ServerConfig::max_connections` defaults to 32. At capacity, accepting pauses
+and pending peers are subject to the operating system backlog. On shutdown,
+`serve` closes its listener, drains accepted handlers for
+`ServerConfig::shutdown_grace` (five seconds by default), then aborts and joins
+any remaining tasks. Set the grace to zero for immediate cancellation. Await
+the `serve` future for the joined guarantee; dropping it requests child-task
+cancellation but cannot synchronously join them. Cancellation does not undo
+handler effects already performed, including effects from submitted uploads.
+
 ## CLI
 
 ```sh

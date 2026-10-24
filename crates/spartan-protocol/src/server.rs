@@ -7,8 +7,13 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::{JoinError, JoinSet};
+use tokio::time::Instant;
 
 use super::Status;
+
+const DEFAULT_MAX_CONNECTIONS: usize = 32;
+const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 /// One parsed spartan request: the request line's three components plus the
 /// uploaded data block (empty for a plain fetch).
@@ -88,6 +93,12 @@ pub struct ServerConfig {
     pub max_upload: usize,
     /// Per-connection IO timeout. Default 30s.
     pub timeout: Duration,
+    /// Maximum accepted connection tasks. At capacity, accept pauses and
+    /// pending peers are subject to OS backlog limits. Default 32.
+    pub max_connections: usize,
+    /// One graceful-drain allowance after shutdown is observed. Default 5s;
+    /// zero aborts immediately.
+    pub shutdown_grace: Duration,
 }
 
 impl Default for ServerConfig {
@@ -96,29 +107,45 @@ impl Default for ServerConfig {
             max_request_line: 4096,
             max_upload: 4 * 1024 * 1024,
             timeout: Duration::from_secs(30),
+            max_connections: DEFAULT_MAX_CONNECTIONS,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
         }
     }
 }
 
 /// Accept connections on `listener` and serve them through `handler` until
 /// `shutdown` resolves. Each connection is one request-response, per spec §1.
+/// The listener is supplied already bound, so lifecycle config validation
+/// happens before the first accept. Shutdown closes the listener, drains
+/// accepted tasks for one grace window, then aborts and joins remaining tasks.
+/// Await this future for the joined guarantee; dropping it requests child
+/// cancellation but cannot await their joins. Task cancellation is
+/// cooperative: it cannot preempt synchronous handler work or undo effects.
 pub async fn serve(
     listener: TcpListener,
     handler: impl Handler,
     config: ServerConfig,
     shutdown: impl Future<Output = ()>,
 ) -> std::io::Result<()> {
+    validate_lifecycle(config.max_connections, config.shutdown_grace)?;
     let handler = Arc::new(handler);
     let config = Arc::new(config);
+    let mut connections = JoinSet::new();
     tokio::pin!(shutdown);
-    loop {
+    let stopped_at = loop {
         tokio::select! {
-            _ = &mut shutdown => break,
-            accepted = listener.accept() => match accepted {
+            biased;
+            _ = &mut shutdown => break Instant::now(),
+            joined = connections.join_next(), if !connections.is_empty() => {
+                if let Some(result) = joined {
+                    report_connection_join(result);
+                }
+            }
+            accepted = listener.accept(), if connections.len() < config.max_connections => match accepted {
                 Ok((stream, peer)) => {
                     let handler = handler.clone();
                     let config = config.clone();
-                    tokio::spawn(async move {
+                    connections.spawn(async move {
                         if let Err(error) = handle_connection(stream, peer, handler, &config).await {
                             log::debug!("spartan: connection from {peer} failed: {error}");
                         }
@@ -127,8 +154,61 @@ pub async fn serve(
                 Err(error) => log::warn!("spartan: accept failed: {error}"),
             },
         }
+    };
+    let grace_deadline = stopped_at
+        .checked_add(config.shutdown_grace)
+        .unwrap_or(stopped_at);
+    drop(listener);
+    finish_connections(&mut connections, grace_deadline).await;
+    Ok(())
+}
+
+fn validate_lifecycle(max_connections: usize, shutdown_grace: Duration) -> std::io::Result<()> {
+    if max_connections == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid spartan connection limit",
+        ));
+    }
+    if std::time::Instant::now()
+        .checked_add(shutdown_grace)
+        .is_none()
+        || Instant::now().checked_add(shutdown_grace).is_none()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid spartan shutdown grace",
+        ));
     }
     Ok(())
+}
+
+fn report_connection_join(result: Result<(), JoinError>) {
+    if let Err(error) = result {
+        if error.is_panic() {
+            log::warn!("spartan: connection task panicked: {error}");
+        } else {
+            log::debug!("spartan: connection task cancelled: {error}");
+        }
+    }
+}
+
+async fn finish_connections(connections: &mut JoinSet<()>, deadline: Instant) {
+    if Instant::now() < deadline {
+        let drained = tokio::time::timeout_at(deadline, async {
+            while let Some(result) = connections.join_next().await {
+                report_connection_join(result);
+            }
+        })
+        .await;
+        if drained.is_ok() {
+            return;
+        }
+    }
+    connections.abort_all();
+    while let Some(result) = connections.join_next().await {
+        report_connection_join(result);
+    }
 }
 
 async fn handle_connection(
@@ -380,3 +460,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "server_lifecycle_tests.rs"]
+mod server_lifecycle_tests;

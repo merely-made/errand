@@ -36,6 +36,15 @@ Serving is a `Handler` (any async closure) plus `serve`; `FileHandler` serves
 a directory tree — `index.nex` per directory when present, else a generated
 `=> ` listing — with traversal protection.
 
+`ServerConfig::max_connections` defaults to 32. At capacity, accepting pauses
+and pending peers are subject to the operating system backlog. On shutdown,
+`serve` closes its listener, drains accepted handlers for
+`ServerConfig::shutdown_grace` (five seconds by default), then aborts and joins
+any remaining tasks. Set the grace to zero for immediate cancellation. Await
+the `serve` future for the joined guarantee; dropping it requests child-task
+cancellation but cannot synchronously join them. Cancellation does not undo
+handler effects already performed.
+
 ## CLI
 
 ```sh

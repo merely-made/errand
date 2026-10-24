@@ -7,6 +7,8 @@ and receiving deadlines, plus native Misfin admission and joined shutdown.
 Whole-transaction, step, connection-count and shutdown-grace policies remain
 independently configurable. Sibling server lifecycle policies stay separately
 scoped.
+Phase 10 is in progress for native Gemini, Gopher, Finger, Nex and Spartan
+admission/joined shutdown, preserving each protocol's existing timing semantics.
 
 ## Ownership and scope
 
@@ -132,10 +134,43 @@ receipts. New receipt hashes must state their Git/native byte convention.
    receiving deadline/framing semantics unchanged. Shared receipt cap 100 MB;
    explicitly set both approved Cargo target and build-directory variables.
 
+10. Add bounded admission and joined shutdown to native Gemini, Gopher, Finger,
+    Nex and Spartan listeners. Each native `ServerConfig` supplies independent
+    `max_connections` (default 32, nonzero) and `shutdown_grace` (default 5s,
+    zero requests immediate cancellation). Because callers supply the already
+    bound listener, invalid new policy refuses before acceptance/handler work,
+    not before the caller's bind. Pause acceptance at capacity, subject to OS
+    backlog limits; reap completions/failures/panics. Prioritize shutdown, fix
+    the grace deadline when observed, close listener, drain until that deadline,
+    then abort and await every terminal join. Drop requests cancellation but
+    cannot await cleanup; explicit signal plus awaited `serve` is the guarantee.
+    Preserve each native handler, timeout site/default, parser, response encoder,
+    TLS posture, request bytes and submission effects. Done when each protocol
+    has real native saturation, capacity reuse, exact graceful response and
+    forced shutdown tests, controlled fixed-grace/drop/panic checks, independent
+    feature builds and strict native Clippy on exact-source/lock receipts. Keep
+    protocol crates independently consumable; no generic runtime extraction,
+    facade routing, product repins, Guppy or caller-owned Scroll/Scorpion changes.
+    Use bounded Luna owner lanes and the shared 100 MB evidence cap, with both
+    stable Cargo target/build variables explicitly set for locked/offline gates.
+
 ## Findings
 
 ### 2026-10-23
 
+- The five TCP sibling listeners expose different native timing: Gemini times
+  TLS and reads; Gopher/Finger time read operations; Nex times reads and reply
+  writes; Spartan additionally times a declared upload body. Handler execution
+  and some close/write paths remain caller/native concerns. Admission and grace
+  add lifecycle policy without converting these into a common transaction
+  deadline. Native request/response functions are compared with the baseline
+  to keep this boundary reviewable.
+- Known Knot Gemini and Spartan listener consumers construct config with
+  `..Default::default()`, retaining source compatibility with added fields.
+  They still pin earlier supplier cohorts and have not acquired these changes.
+  Their runtime shutdown behavior requires separate qualification at adoption;
+  this supplier slice makes no product-repin or installed-host claim. Djinn's
+  custom governed listener remains independently owned by its existing policy.
 - The native family survey finds detached accepted tasks in Misfin, Gemini,
   Gopher, Finger, Nex and Spartan. Their handler and I/O deadlines differ, so
   this phase qualifies Misfin first. Guppy's inline UDP loop already bounds
@@ -268,6 +303,15 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: started phase 10 on smolweb main. Three bounded Luna lanes own
+  Gemini, Gopher/Finger and Nex/Spartan source, focused tests and crate docs;
+  root owns consumer audit, plans, exact-source review and all Cargo gates.
+  Required evidence is real TCP/TLS plus controlled lifecycle results, native
+  semantic preservation, independent feature/Clippy results and source/lock
+  identities. The shared retained-byte cap is 100 MB, summaries only; reuse
+  `C:/t/cargo-targets/smolweb` and its `build` directory. No new worktree/home;
+  preserve unrelated work and older receipts/cache.
 
 - 2026-10-23: source `7a23e0dc` completes phase 9. The final combined gate passes
   152 unit tests, 14 integration tests and one doctest, with the existing live

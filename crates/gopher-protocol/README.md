@@ -34,6 +34,20 @@ off-by-default `server` feature: it reads all three request fields, so one
 handler answers both RFC 1436 and Gopher+ callers, and the Gopher+ length
 header is written for you.
 
+The server admits at most 32 connection tasks by default (`ServerConfig`
+`max_connections`), and allows five seconds to finish admitted work after
+shutdown (`shutdown_grace`). Both settings are configurable; the limit must be
+nonzero and a zero grace means immediate abort. At capacity the listener pauses
+accepting, leaving pending peers to the operating-system backlog. Signal
+shutdown and await `serve` to close the listener, drain against one fixed grace
+deadline, then abort and join remaining tasks. Dropping `serve` requests
+cancellation of its owned tasks but cannot await their joins; handler side
+effects already performed synchronously are not rolled back.
+
+Gopher request parsing and response framing remain native: a Gopher+ request
+still receives its counted `+<length>` header, while an ordinary request gets
+the handler bytes without a status line.
+
 ## Example
 
 ```rust,no_run

@@ -57,6 +57,22 @@ The client can present a caller-selected identity and retains `6x` status facts.
 The built-in server acceptor does not request client certificates; selecting
 server authentication policy remains a separate hosting concern.
 
+## Server lifecycle
+
+With the `server` feature, `server::serve` takes a listener that the caller has
+already bound and a caller-built TLS acceptor. `ServerConfig` defaults to at
+most 32 accepted connections and a five-second graceful shutdown window. A zero
+connection limit or an unrepresentable grace duration is rejected before the
+server accepts a connection or calls its handler. At capacity, accepting pauses
+and waiting peers remain subject to the operating system's listener backlog.
+
+When the shutdown future resolves, the listener closes and admitted work may
+finish until the single grace deadline. Remaining connection tasks are aborted
+and joined. Signal shutdown and await `serve` for that joined guarantee; dropping
+the `serve` future cancels its owned tasks but cannot await their termination.
+Cancellation cannot undo synchronous side effects already performed by a
+handler.
+
 ## License
 
 MIT.

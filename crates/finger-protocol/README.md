@@ -67,3 +67,17 @@ a truncated success. Bounds are enforced before body append. No runtime is added
 `max_header_line_bytes`, and `max_body_bytes`. `fetch_with_options` and
 `query_with_options` retain the native Query API. Requests default to 4096 wire
 bytes including CRLF; Finger has no response header and ignores that setting.
+
+The optional server admits at most 32 connection tasks by default
+(`ServerConfig` `max_connections`) and allows five seconds to finish admitted
+work after shutdown (`shutdown_grace`). Both settings are configurable; the
+limit must be nonzero and zero grace means immediate abort. At capacity the
+listener pauses accepting, leaving pending peers to the operating-system
+backlog. Signal shutdown and await `serve` to close the listener, drain against
+one fixed grace deadline, then abort and join remaining tasks. Dropping `serve`
+requests cancellation of its owned tasks but cannot await their joins; handler
+side effects already performed synchronously are not rolled back.
+
+Finger's `/W` parsing and free-form response bytes are unchanged; the server
+does not add a status or length header, and closing the connection still ends
+the reply.

@@ -26,10 +26,15 @@ use std::time::Duration;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::{JoinError, JoinSet};
+use tokio::time::Instant;
 use tokio_rustls::TlsAcceptor;
 use url::Url;
 
 use crate::client::{DEFAULT_PORT, Status};
+
+const DEFAULT_MAX_CONNECTIONS: usize = 32;
+const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 /// One gemini request: the absolute URL the client asked for.
 #[derive(Debug, Clone)]
@@ -137,6 +142,13 @@ pub struct ServerConfig {
     pub max_request_line: usize,
     /// Per-connection IO timeout. Default 30s.
     pub timeout: Duration,
+    /// Maximum accepted connection tasks, including TLS handshakes. Default 32.
+    /// Must be nonzero. At capacity, accept pauses and pending peers are
+    /// subject to OS backlog limits.
+    pub max_connections: usize,
+    /// One graceful-drain allowance after shutdown is observed. Default 5s.
+    /// Zero aborts immediately.
+    pub shutdown_grace: Duration,
 }
 
 impl Default for ServerConfig {
@@ -144,6 +156,8 @@ impl Default for ServerConfig {
         Self {
             max_request_line: 1024,
             timeout: Duration::from_secs(30),
+            max_connections: DEFAULT_MAX_CONNECTIONS,
+            shutdown_grace: DEFAULT_SHUTDOWN_GRACE,
         }
     }
 }
@@ -164,8 +178,18 @@ pub fn acceptor(
     Ok(TlsAcceptor::from(Arc::new(config)))
 }
 
-/// Accept connections on `listener` and serve them through `handler` until
-/// `shutdown` resolves.
+/// Accept connections on the caller-bound `listener` and serve them through
+/// `handler` until `shutdown` resolves. Invalid lifecycle settings are rejected
+/// before accepting a connection or calling the handler.
+///
+/// At most [`ServerConfig::max_connections`] tasks run at once; when full,
+/// accepting pauses and waiting peers remain subject to the operating system's
+/// listener backlog. Shutdown closes the listener and gives admitted tasks one
+/// fixed [`ServerConfig::shutdown_grace`] window to finish, then aborts and
+/// joins the remaining tasks. Signal shutdown and await this future for that
+/// joined guarantee. Dropping the future cancels its owned task set but cannot
+/// await termination. Cancellation cannot undo synchronous handler side
+/// effects already performed.
 pub async fn serve(
     listener: TcpListener,
     acceptor: TlsAcceptor,
@@ -173,18 +197,26 @@ pub async fn serve(
     config: ServerConfig,
     shutdown: impl Future<Output = ()>,
 ) -> std::io::Result<()> {
+    validate_lifecycle(config.max_connections, config.shutdown_grace)?;
     let handler = Arc::new(handler);
     let config = Arc::new(config);
+    let mut connections = JoinSet::new();
     tokio::pin!(shutdown);
-    loop {
+    let stopped_at = loop {
         tokio::select! {
-            _ = &mut shutdown => break,
-            accepted = listener.accept() => match accepted {
+            biased;
+            _ = &mut shutdown => break Instant::now(),
+            joined = connections.join_next(), if !connections.is_empty() => {
+                if let Some(result) = joined {
+                    report_connection_join(result);
+                }
+            }
+            accepted = listener.accept(), if connections.len() < config.max_connections => match accepted {
                 Ok((stream, peer)) => {
                     let acceptor = acceptor.clone();
                     let handler = handler.clone();
                     let config = config.clone();
-                    tokio::spawn(async move {
+                    connections.spawn(async move {
                         if let Err(error) =
                             handle_connection(stream, peer, acceptor, handler, &config).await
                         {
@@ -195,8 +227,61 @@ pub async fn serve(
                 Err(error) => log::warn!("gemini: accept failed: {error}"),
             },
         }
+    };
+    let grace_deadline = stopped_at
+        .checked_add(config.shutdown_grace)
+        .unwrap_or(stopped_at);
+    drop(listener);
+    finish_connections(&mut connections, grace_deadline).await;
+    Ok(())
+}
+
+fn validate_lifecycle(max_connections: usize, shutdown_grace: Duration) -> std::io::Result<()> {
+    if max_connections == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid gemini connection limit",
+        ));
+    }
+    if std::time::Instant::now()
+        .checked_add(shutdown_grace)
+        .is_none()
+        || Instant::now().checked_add(shutdown_grace).is_none()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid gemini shutdown grace",
+        ));
     }
     Ok(())
+}
+
+fn report_connection_join(result: Result<(), JoinError>) {
+    if let Err(error) = result {
+        if error.is_panic() {
+            log::warn!("gemini: connection task panicked: {error}");
+        } else {
+            log::debug!("gemini: connection task cancelled: {error}");
+        }
+    }
+}
+
+async fn finish_connections(connections: &mut JoinSet<()>, deadline: Instant) {
+    if Instant::now() < deadline {
+        let drained = tokio::time::timeout_at(deadline, async {
+            while let Some(result) = connections.join_next().await {
+                report_connection_join(result);
+            }
+        })
+        .await;
+        if drained.is_ok() {
+            return;
+        }
+    }
+    connections.abort_all();
+    while let Some(result) = connections.join_next().await {
+        report_connection_join(result);
+    }
 }
 
 async fn handle_connection(
@@ -358,3 +443,7 @@ mod tests {
         assert_eq!(Reply::header(90, "?").status(), None);
     }
 }
+
+#[cfg(test)]
+#[path = "server_lifecycle_tests.rs"]
+mod server_lifecycle_tests;

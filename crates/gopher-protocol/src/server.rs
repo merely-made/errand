@@ -24,6 +24,8 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::{JoinError, JoinSet};
+use tokio::time::Instant;
 
 use crate::plus::PlusRequest;
 
@@ -64,6 +66,13 @@ pub struct ServerConfig {
     pub max_request_line: usize,
     /// Per-connection IO timeout. Default 30s.
     pub timeout: Duration,
+    /// Maximum number of accepted connection tasks. Default 32. Must be
+    /// nonzero. At capacity, accept pauses and pending peers are subject to OS
+    /// backlog limits.
+    pub max_connections: usize,
+    /// One graceful-drain allowance after shutdown is observed. Default 5s.
+    /// Zero aborts immediately.
+    pub shutdown_grace: Duration,
 }
 
 impl Default for ServerConfig {
@@ -71,29 +80,46 @@ impl Default for ServerConfig {
         Self {
             max_request_line: 2048,
             timeout: Duration::from_secs(30),
+            max_connections: 32,
+            shutdown_grace: Duration::from_secs(5),
         }
     }
 }
 
 /// Accept connections on `listener` and serve them through `handler` until
-/// `shutdown` resolves.
+/// `shutdown` resolves. At most [`ServerConfig::max_connections`] tasks are
+/// admitted; at capacity the listener stops accepting and the OS backlog
+/// applies. When shutdown is observed, the listener closes and admitted work
+/// drains for one fixed grace period before remaining tasks are aborted and
+/// joined. Signal shutdown and await this future for that joined guarantee.
+/// Dropping this future aborts its owned tasks but cannot await their joins.
+/// Cancellation does not roll back synchronous side effects already performed
+/// by a handler.
 pub async fn serve(
     listener: TcpListener,
     handler: impl Handler,
     config: ServerConfig,
     shutdown: impl Future<Output = ()>,
 ) -> std::io::Result<()> {
+    validate_lifecycle(config.max_connections, config.shutdown_grace)?;
     let handler = Arc::new(handler);
     let config = Arc::new(config);
+    let mut connections = JoinSet::new();
     tokio::pin!(shutdown);
-    loop {
+    let stopped_at = loop {
         tokio::select! {
-            _ = &mut shutdown => break,
-            accepted = listener.accept() => match accepted {
+            biased;
+            _ = &mut shutdown => break Instant::now(),
+            joined = connections.join_next(), if !connections.is_empty() => {
+                if let Some(result) = joined {
+                    report_connection_join(result);
+                }
+            }
+            accepted = listener.accept(), if connections.len() < config.max_connections => match accepted {
                 Ok((stream, peer)) => {
                     let handler = handler.clone();
                     let config = config.clone();
-                    tokio::spawn(async move {
+                    connections.spawn(async move {
                         if let Err(error) = handle_connection(stream, peer, handler, &config).await {
                             log::debug!("gopher: connection from {peer} failed: {error}");
                         }
@@ -102,8 +128,65 @@ pub async fn serve(
                 Err(error) => log::warn!("gopher: accept failed: {error}"),
             },
         }
+    };
+    let grace_deadline = stopped_at
+        .checked_add(config.shutdown_grace)
+        .unwrap_or(stopped_at);
+    drop(listener);
+    finish_connections(&mut connections, grace_deadline).await;
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "server_lifecycle_tests.rs"]
+mod lifecycle_tests;
+
+fn validate_lifecycle(max_connections: usize, shutdown_grace: Duration) -> std::io::Result<()> {
+    if max_connections == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid gopher connection limit",
+        ));
+    }
+    if std::time::Instant::now()
+        .checked_add(shutdown_grace)
+        .is_none()
+        || Instant::now().checked_add(shutdown_grace).is_none()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid gopher shutdown grace",
+        ));
     }
     Ok(())
+}
+
+fn report_connection_join(result: Result<(), JoinError>) {
+    if let Err(error) = result {
+        if error.is_panic() {
+            log::warn!("gopher: connection task panicked: {error}");
+        } else {
+            log::debug!("gopher: connection task cancelled: {error}");
+        }
+    }
+}
+
+async fn finish_connections(connections: &mut JoinSet<()>, deadline: Instant) {
+    if Instant::now() < deadline {
+        let drained = tokio::time::timeout_at(deadline, async {
+            while let Some(result) = connections.join_next().await {
+                report_connection_join(result);
+            }
+        })
+        .await;
+        if drained.is_ok() {
+            return;
+        }
+    }
+    connections.abort_all();
+    while let Some(result) = connections.join_next().await {
+        report_connection_join(result);
+    }
 }
 
 async fn handle_connection(
