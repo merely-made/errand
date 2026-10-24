@@ -1,0 +1,212 @@
+{
+  "schema": "caller-owned-exchange-shutdown-qualification-v1",
+  "date": "2026-10-23",
+  "owner": "Scroll and Scorpion native server exchanges over borrowed streams",
+  "qualified_source": "34e2c3c4f63891ced5e8e6e0a1c347f1ca99f164",
+  "qualified_tree": "06fc731a45d861a2ead1d2ce9570d9acf541fa57",
+  "crate_trees": {
+    "scroll-protocol": "1be418eeab582bb23e42181d8f6531921e779461",
+    "scorpion-protocol": "c5b33cc94bc66625cd3e7d311e26e9da53931adc"
+  },
+  "base_source": "d00cf7ef771c2c49ef55c25410a7767166ae4b48",
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "git_lock_blob": "aeee95e98a7f49618dd4be4316ea477a112a2268",
+  "dependency_delta": "Both optional server features explicitly enable tokio/macros for select; Scroll adds dev-only test-util for paused-time controls. No dependency version or Cargo.lock change. Grammar-only and client/TLS feature boundaries remain independent.",
+  "native_source_sha256": {
+    "crates/scroll-protocol/Cargo.toml": "a6ae07ffeb096f586b3d843bbeae6ccc5ac4045f90c7c47be2eb2158f6460de9",
+    "crates/scroll-protocol/src/server.rs": "85beed2a2bba52ef15787ff568bd035814fc20e934ca8fe72cd5f0b05fa64c6b",
+    "crates/scroll-protocol/src/server_shutdown_tests.rs": "fa6ed94689a5ab50db52350ceae0ae864689face7ad73d0c467ac5e9231f57b2",
+    "crates/scroll-protocol/README.md": "481d9ced6884f42b65c074ac4f6a7382a0b7df0cbd7fded7b5ac99e5517a3d16",
+    "crates/scorpion-protocol/Cargo.toml": "88469a65edc65d5715fd229a66b937eeadf6b84a8db5f01acbff3bade37ba6d2",
+    "crates/scorpion-protocol/src/server.rs": "d43b224b1454a84337fc9cbbdc49e0530cadf48c0d09edd459d88e0cbb271004",
+    "crates/scorpion-protocol/src/server_shutdown_tests.rs": "da4ed496dc5a8129e65db9b7dd14ff3fca3d3c82331faf1c784a632d6d4d2fd6",
+    "crates/scorpion-protocol/README.md": "428ab89b1a49586bcff9a077b71fcf44db7ac3b8a3101633dbbc12f7a8f325f7"
+  },
+  "toolchain": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo 1.99.1 (5f94df478 2026-08-27)"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "C:\\t\\cargo-targets\\smolweb",
+    "CARGO_BUILD_BUILD_DIR": "C:\\t\\cargo-targets\\smolweb\\build",
+    "note": "Root alone runs Cargo; every gate sets both stable directories and uses --locked --offline. Luna ran no Cargo."
+  },
+  "commands": [
+    {
+      "command": "cargo test -p scroll-protocol -p scorpion-protocol -p errand --all-features --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 196,
+      "integration_passed": 24,
+      "doctest_passed": 4,
+      "failed": 0,
+      "ignored": 1,
+      "by_owner": {
+        "scroll-protocol": {
+          "unit": 50,
+          "integration": 0,
+          "doc": 2
+        },
+        "scorpion-protocol": {
+          "unit": 77,
+          "integration": 10,
+          "doc": 1
+        },
+        "errand": {
+          "unit": 69,
+          "integration": 14,
+          "doc": 1,
+          "ignored": 1
+        }
+      },
+      "note": "Final source, normal parallel harness; existing live Nex ignore unchanged."
+    },
+    {
+      "command": "cargo test -p scroll-protocol --no-default-features --features server --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 45,
+      "doctest_passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "note": "Independent minimum server graph, includes all seven new Scroll cases; overlaps full cohort."
+    },
+    {
+      "command": "cargo test -p scorpion-protocol --no-default-features --features server --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 50,
+      "integration_passed": 10,
+      "doctest_passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "note": "Independent minimum server graph, includes all nine new Scorpion cases; overlaps full cohort."
+    },
+    {
+      "command_template": "cargo check -p <crate> --no-default-features --locked --offline --quiet [--features <feature>]",
+      "scope": "Ten separate invocations, without workspace-wide feature unification",
+      "results": [
+        {
+          "graph": "scroll-protocol:none",
+          "exit_code": 0
+        },
+        {
+          "graph": "scroll-protocol:client",
+          "exit_code": 0
+        },
+        {
+          "graph": "scroll-protocol:tls",
+          "exit_code": 0
+        },
+        {
+          "graph": "scroll-protocol:server",
+          "exit_code": 0
+        },
+        {
+          "graph": "scorpion-protocol:none",
+          "exit_code": 0
+        },
+        {
+          "graph": "scorpion-protocol:client",
+          "exit_code": 0
+        },
+        {
+          "graph": "scorpion-protocol:tls",
+          "exit_code": 0
+        },
+        {
+          "graph": "scorpion-protocol:server",
+          "exit_code": 0
+        },
+        {
+          "graph": "errand:none",
+          "exit_code": 0
+        },
+        {
+          "graph": "errand:serve",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "command": "cargo clippy -p scroll-protocol -p scorpion-protocol --all-features --all-targets --locked --offline --quiet --no-deps -- -D warnings",
+      "exit_code": 0,
+      "strict": true
+    },
+    {
+      "command": "rustfmt --edition 2024 --config skip_children=true --check crates/scroll-protocol/src/server.rs crates/scroll-protocol/src/server_shutdown_tests.rs crates/scorpion-protocol/src/server_shutdown_tests.rs",
+      "exit_code": 0
+    },
+    {
+      "command": "rustfmt --edition 2024 --config skip_children=true --check crates/scorpion-protocol/src/server.rs",
+      "exit_code": 1,
+      "classification": "Unchanged baseline formatting, not a new-source formatting pass",
+      "note": "Nine pre-existing formatting hunks: Reply::render vector and match comma, Source::receive wrapping, four native dispatch match commas, request-limit error wrapping, and old malformed-request test wrapping. Native file minus only the additive wrapper/docs and test-module suffix compares exactly to baseline; no changed line appears in formatter differences."
+    },
+    {
+      "command": "git diff --cached --check",
+      "exit_code": 0
+    }
+  ],
+  "implementation": {
+    "api": "Each native server module adds serve_connection_until_shutdown. One biased select polls caller shutdown first, returns io::ErrorKind::Interrupted on stop, otherwise returns the unchanged serve_connection result.",
+    "timing": {
+      "scroll": "Unchanged ServerConfig::timeout: 30s default, one request/handler/write/flush budget; expiry stays TimedOut. Shutdown does not renew it.",
+      "scorpion": "The native server has no built-in deadline. Caller outer timeout_at/actor policy stays authoritative; a 31s successful exchange within a 40s caller budget proves the companion adds no 30s timer."
+    },
+    "ownership": "Both APIs borrow &mut stream and handler/source. Cancellation drops inline work before return, but never calls stream shutdown or drops the carrier. External future drop also releases inline work. Hosts own admission, tasks, joining, TLS, close and any grace period.",
+    "effects": "Partial request consumption, emitted bytes and source/handler effects cannot be undone. Caller must retire a carrier after cancellation or partial failure. Synchronous or continuously-ready source/carrier work remains cooperatively cancellable.",
+    "handoff": "Ordinary Scorpion success still returns Option<Request> and leaves later bytes unread. Tests preserve R range/exclusive end and whole-file total, native binary response, M desired type, S version and 70 readiness, I capability bytes and 00 status. Upload and interactive session drivers remain unimplemented."
+  },
+  "native_comparison": {
+    "baseline": "d00cf7ef771c2c49ef55c25410a7767166ae4b48",
+    "method": "Normalize CRLF to LF and trim final whitespace. Remove only each new shutdown companion with its documentation, plus the new cfg(test)/path/module declaration. Compare the entire remaining server source to baseline, including native config, parsing, dispatch, encoders and existing tests.",
+    "scroll-protocol": {
+      "equal": true,
+      "lf_utf8_trim_end_sha256": "524eee9fccc9bbc0ccb3990a9d2731fc30369873db871e828ceb58c325d12829"
+    },
+    "scorpion-protocol": {
+      "equal": true,
+      "lf_utf8_trim_end_sha256": "6a06beda17833bd0e819f775d695477ae5122a463f3d86e1e0fa990c363cf7ec"
+    }
+  },
+  "coverage": {
+    "new_cases": 16,
+    "scroll": 7,
+    "scorpion": 9,
+    "cases": [
+      "Ready shutdown wins before native I/O/source polling, including fully-ready Scroll exchange.",
+      "Started request read, handler/source, response write and flush cancel; inline source guards drop before return; borrowed stream is neither shut down nor dropped.",
+      "Scroll partial request consumption and partial response write remain visible; complete emitted output survives flush cancellation.",
+      "Dropping each wrapper cancels the active handler/source and releases its borrow without detached work.",
+      "Paused Scroll fixed 10s native deadline spans 4s request read, 4s handler and blocked flush, without renewal.",
+      "Paused Scorpion caller absolute deadline expires at exactly 7s; 31s source succeeds under caller 40s deadline with no native server timer.",
+      "Scroll ordered languages, abstract flag, UDC class, MIME/language, Unicode author, verbatim dates and exact body bytes survive successful wrapper exchange; trailing bytes remain unread.",
+      "Scorpion exact R/M/S/I request/results and reply bytes preserve range/binary framing and caller-owned later phases.",
+      "Scroll malformed request keeps native 59 refusal; zero native timeout refuses before I/O."
+    ],
+    "limits": "Controlled caller-supplied carriers and existing native/duplex/TCP/TLS suites qualify in-process exchange behavior. No new listener, TLS policy, installed product, radio, independent peer or product-repin qualification is claimed."
+  },
+  "review": {
+    "lane": "Bounded Luna Scorpion source/tests implementation and read-only Scroll review; root owns integration, tests, documentation, commits and all Cargo gates.",
+    "corrections": "Before execution root review corrected unpolled-start-barrier deadlocks, an incorrect write/source count, moved pinned future reuse and loose/incorrect expected response assertions. A preliminary filter named server_shutdown_tests selected zero Scorpion tests under the old shutdown_tests module label; root aligned the module label and ran all nine focused tests plus full/minimum suites. No failed compile or test run remains."
+  },
+  "scope": {
+    "changed": "Two additive native server companions, feature-scoped Tokio macro support, paused-time dev feature for Scroll, focused tests, native READMEs and canonical plan/index.",
+    "unchanged": "Existing native server implementations/deadlines and stream ownership, native client limits/deadlines, all listener/UDP engine policy, Errand adapters/routes, site snapshot V1, product pins and older receipts.",
+    "consumer": "Live owner-path scan found Djinn moot_site.rs still invokes existing Scroll serve_connection under its independent TLS/task host policy. No companion adoption or product repin is included."
+  },
+  "resources": {
+    "shared_evidence_cap_bytes": 100000000,
+    "retained": "Compact JSON and byte-preserving attribute only; no copied binary or full log.",
+    "new_isolated_targets": [],
+    "new_cargo_homes": [],
+    "new_worktrees": [],
+    "prior_cache": {
+      "path": "C:\\Users\\mark_\\Code\\repos\\smolweb\\target\\build",
+      "owner": "Prior Misfin receiving lane",
+      "reason": "Prior scoped cleanup was rejected as blocked by policy; no retry.",
+      "unchanged_task_files": 1234,
+      "unchanged_task_bytes": 356351526,
+      "note": "Creation-window measurement reconfirmed these prior files; no new output here. All new gates use the stable approved target and build directories."
+    }
+  },
+  "byte_convention": "Native SHA256 identifies Windows source bytes; Git trees/blobs identify normalized repository content. JSON and attributes are UTF-8 LF under -text. Qualification commit changes docs/receipt only."
+}

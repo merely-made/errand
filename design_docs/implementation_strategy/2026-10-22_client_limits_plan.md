@@ -1,6 +1,6 @@
 # Client receive limits
 
-**Status (2026-10-23):** phases 1 to 11 landed and qualified: routed clients,
+**Status (2026-10-23):** phases 1 to 12 landed and qualified: routed clients,
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
 size and framing limits, native session operation deadlines, and Misfin sending
 and receiving deadlines, plus native Misfin, Gemini, Gopher, Finger, Nex and
@@ -8,10 +8,8 @@ Spartan admission and joined shutdown, plus Guppy's inline UDP shutdown.
 Whole-transaction, step, connection-count and shutdown-grace policies remain
 independently configurable. Each protocol's native timing and request semantics
 remain distinct. Guppy retains its native UDP session contract without a TCP
-grace policy. Phase 12's explicit stop companions for Scroll and Scorpion's
-caller-owned server exchanges are implemented and command gates pass; exact
-source qualification is being recorded. Native timing and stream ownership
-remain intact.
+grace policy. Scroll and Scorpion have explicit stop companions around their
+caller-owned server exchanges. Native timing and stream ownership remain intact.
 
 ## Ownership and scope
 
@@ -368,6 +366,26 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: phase 12 source `34e2c3c4` adds native Scroll/Scorpion
+  `serve_connection_until_shutdown` companions, returning `Interrupted` on
+  caller stop. The original exchanges compare unchanged after removing only
+  the added wrappers/docs and test-module declarations. Scroll retains one
+  30s-default exchange budget; Scorpion retains caller-owned server deadlines.
+  Sixteen new cases qualify ready stop, actual-start cancellation, inline-drop,
+  partial I/O, native metadata/framing and later-stream handoff. Full
+  Scroll/Scorpion/Errand gates pass 196 unit tests, 24 integration tests and four
+  doctests, with one existing live Nex ignore. Both independent minimum server
+  graphs, ten separate feature builds and strict native Clippy pass. Three
+  changed/new Rust files pass rustfmt; Scorpion's original server formatting
+  differences are retained and identified in the receipt. Tokio macro support
+  is enabled only by each server feature; Scroll adds paused-time dev support.
+  Cargo.lock is unchanged. The
+  [supplier receipt](../../support/receipts/caller-owned-exchanges/supplier.json)
+  records exact source/lock identities and qualification limits. No host repin,
+  listener/task ownership change or upload/interactive driver is implied.
+  Stable approved build roots are reused; prior policy-blocked Misfin cache
+  remains preserved, with its original 1,234 files and 356,351,526 bytes.
 
 - 2026-10-23: source `c63c8c50` completes phase 11. Guppy/Errand pass 88 unit
   tests, 14 integration tests and two doctests, with the existing live Nex
