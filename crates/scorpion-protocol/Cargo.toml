@@ -17,7 +17,7 @@ client = ["dep:tokio", "dep:url"]
 # TLS for `scorpions://`, with trust-on-first-use pinning left to the caller.
 tls = ["client", "dep:tokio-rustls", "dep:rustls", "dep:rustls-pki-types"]
 # Serve requests from a `Source`.
-server = ["dep:tokio", "dep:url"]
+server = ["dep:tokio", "dep:url", "tokio/macros"]
 
 [dependencies]
 # Everything below is optional on purpose: the wire grammar and the document

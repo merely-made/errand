@@ -62,6 +62,15 @@ Language preferences and the abstract flag reach the handler intact; the
 handler owns content selection. A host with one declared language per page can
 keep that policy without the wire layer inventing language negotiation.
 
+`server::serve_connection_until_shutdown` adds a caller-supplied stop future to
+the same exchange. Stop has priority when ready and returns `io::ErrorKind::Interrupted`;
+the native whole-exchange deadline still returns `TimedOut`. Neither path closes
+or shuts down the borrowed stream. Retire a carrier after interruption or partial
+failure, since consumed bytes, emitted bytes and handler effects cannot be undone.
+All work stays inline and is dropped before return or when the exchange future
+is dropped. Synchronous handler and carrier work remains cooperative. Listener
+admission, joining connection tasks and any grace period belong to the host.
+
 ## Not implemented
 
 A listener or TLS/certificate owner; client certificates (including the spec's misfin-certificate

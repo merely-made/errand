@@ -229,6 +229,35 @@ where
     Ok(Some(request))
 }
 
+/// Serve one exchange until it completes or the caller's shutdown future wins.
+///
+/// Shutdown is checked before starting or polling the exchange. If it wins
+/// after I/O or source work has begun, that work is cancelled and this returns
+/// [`io::ErrorKind::Interrupted`]. The caller owns the carrier and must retire
+/// it after an interrupted exchange, since a request or reply may be partial.
+/// Already emitted bytes and source effects cannot be undone. The stream is
+/// never closed or shut down here, including when this future is dropped.
+/// All work stays inline; synchronous source/carrier work is cooperative.
+/// Server deadlines remain caller-owned: this companion creates no timer,
+/// task, or grace period. Successful exchanges return the served request and
+/// leave later stream phases to the caller, as [`serve_connection`] does.
+pub async fn serve_connection_until_shutdown<S, Src, Shutdown>(
+    stream: &mut S,
+    source: &Src,
+    shutdown: Shutdown,
+) -> Result<Option<Request>, io::Error>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+    Src: Source,
+    Shutdown: Future<Output = ()>,
+{
+    tokio::select! {
+        biased;
+        _ = shutdown => Err(io::Error::new(io::ErrorKind::Interrupted, "Scorpion exchange interrupted")),
+        result = serve_connection(stream, source) => result,
+    }
+}
+
 /// Write one reply's status line and body.
 pub async fn write_reply<S>(stream: &mut S, reply: &Reply) -> Result<(), io::Error>
 where
@@ -398,3 +427,7 @@ mod tests {
         assert_eq!(crate::document::parse(body).unwrap(), blocks);
     }
 }
+
+#[cfg(test)]
+#[path = "server_shutdown_tests.rs"]
+mod server_shutdown_tests;

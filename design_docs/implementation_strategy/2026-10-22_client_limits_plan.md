@@ -8,8 +8,10 @@ Spartan admission and joined shutdown, plus Guppy's inline UDP shutdown.
 Whole-transaction, step, connection-count and shutdown-grace policies remain
 independently configurable. Each protocol's native timing and request semantics
 remain distinct. Guppy retains its native UDP session contract without a TCP
-grace policy. Scroll and Scorpion caller-owned exchanges remain separately
-scoped.
+grace policy. Phase 12's explicit stop companions for Scroll and Scorpion's
+caller-owned server exchanges are implemented and command gates pass; exact
+source qualification is being recorded. Native timing and stream ownership
+remain intact.
 
 ## Ownership and scope
 
@@ -172,10 +174,36 @@ receipts. New receipt hashes must state their Git/native byte convention.
     Scorpion caller-owned exchanges, client behavior, config/defaults and other
     protocol lifecycle policies unchanged. Shared evidence cap remains 100 MB.
 
+12. Add explicit shutdown companions to Scroll and Scorpion's caller-owned
+    server exchanges. A shutdown-prioritized select calls the unchanged native
+    exchange, returning `io::ErrorKind::Interrupted` on stop. Scroll retains its
+    existing whole-exchange `ServerConfig::timeout` (30s default); Scorpion
+    retains caller-owned server timing, including an outer absolute deadline
+    when supplied. Keep stream borrowing, native request/response framing,
+    metadata, range and R/M/S/I dispatch intact. Neither companion closes the
+    stream, opens a listener, spawns work, joins host tasks or adds a grace
+    policy. Partial errors/cancellation require carrier retirement by the
+    caller; already emitted bytes and handler effects survive cancellation.
+    Done when ready-stop, started read/handler/write/flush, future-drop,
+    native deadline and exact native reply/handoff controls pass alongside
+    independent grammar/client/server/TLS builds and strict native Clippy.
+    Retain compact exact-source/lock receipts within the shared 100 MB cap.
+    Listener/actor policy, client deadlines, product repins and upload or
+    interactive session drivers remain separately owned.
+
 ## Findings
 
 ### 2026-10-23
 
+- Scroll already bounds its complete borrowed server exchange; Scorpion's
+  server exchange has no timer and relies on its caller's timing policy. Their
+  explicit stop companions wrap those functions unchanged. Stop returns
+  `Interrupted` rather than reporting a successful exchange; native errors and
+  timeout results pass through. All work is inline, so cancellation drops it
+  before return without disposing of the caller's carrier. Continuously-ready
+  or synchronous work remains cooperatively cancellable. Scorpion still
+  returns the original served request and leaves later stream phases to the
+  caller; its upload/interactive drivers remain unimplemented.
 - Guppy's old select checked stop only between receive/tick iterations. A
   handler, malformed/special reply, initial window, ACK-driven window or
   retransmission could await inside the selected branch while stop went
@@ -211,8 +239,9 @@ receipts. New receipt hashes must state their Git/native byte convention.
   phase 10 qualifies the other five without unifying their handler/I/O timing.
   Guppy's inline UDP loop already bounded peer sessions; phase 11 qualifies
   whole-engine shutdown while retaining those UDP semantics.
-  Scroll and Scorpion exchange over caller-owned streams and must retain that
-  ownership. Errand's `serve` adapters do not own listener lifetime.
+  Phase 12 gives Scroll and Scorpion explicit exchange stop companions while
+  retaining caller-owned streams and timing. Errand's `serve` adapters do not
+  own listener lifetime.
 - Djinn already composes native exchanges with host-owned policy, capacity
   controls and Armillary `ResidentTasks::close_and_join` in
   `mere/ports/djinn/src/resident_site.rs`, `moot_site.rs` and `micron_site.rs`.

@@ -145,6 +145,19 @@ a Tokio time driver; grammar-only builds remain independent of Tokio. Deadline
 checks reject late completion, but blocking inside a custom carrier's poll still
 delays cancellation.
 
+The server offers the matching caller-owned boundary:
+`serve_connection_until_shutdown(&mut stream, &source, shutdown)` races one
+exchange against the caller's future. A ready shutdown wins before the exchange
+is polled. If shutdown arrives after a read, source call, write, or flush has
+started, that work is cancelled and the function returns
+`io::ErrorKind::Interrupted`; the caller must retire the carrier because the
+exchange may have consumed or written only part of a frame. The wrapper creates
+no timer, task, grace period, or stream shutdown policy. Dropping its future
+cancels in-flight work without detached tasks, while synchronous work inside a
+custom poll remains cooperative. On ordinary success, the caller still owns
+the stream and can hand it to a later session phase. `S` and `I` upload and
+interactive drivers remain unimplemented.
+
 ## License
 
 MIT. The specification declares no licence; this implementation is original

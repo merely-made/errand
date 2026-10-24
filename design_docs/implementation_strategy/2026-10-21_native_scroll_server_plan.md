@@ -1,8 +1,10 @@
 # Native Scroll response and connection exchange
 
-**Status (2026-10-21):** landed; supplier and Knot encoder adoption qualified. Existing Knot publication is the forcing
-consumer. This slice adds a native protocol seam; governed resident Scroll
-hosting remains a later Mere/Djinn gate.
+**Status (2026-10-23):** landed; supplier, Knot encoder adoption and governed
+Mere/Djinn hosting are qualified at their recorded cohorts. Existing Knot
+publication is the forcing consumer. Later client receiving and explicit
+caller-owned exchange shutdown work is tracked in the
+[client limits plan](2026-10-22_client_limits_plan.md); it does not repin hosts.
 
 ## Ownership and scope
 
@@ -92,3 +94,8 @@ source/test results only, under a shared 100 MB cap across this orchestration.
   The long-date proof reads raw trusted TLS. The current client's separate
   4096-byte response-line cap and browser MIME/trust receiving remain open gates;
   native host qualification does not establish their acceptance.
+- 2026-10-23: subsequent browser receiving and configurable native client
+  limits are qualified in the client limits plan. Its phase 12 adds an explicit
+  stop companion around the unchanged native server exchange, retaining the
+  existing host deadline and borrowed stream. Existing published host receipts
+  above still qualify their original supplier cohorts.

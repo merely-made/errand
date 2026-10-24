@@ -91,6 +91,34 @@ where
     .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "Scroll exchange deadline"))?
 }
 
+/// Serve one exchange until the caller signals shutdown.
+///
+/// Shutdown takes priority when both branches are ready and returns
+/// [`io::ErrorKind::Interrupted`], dropping all inline exchange work before
+/// returning. The existing [`ServerConfig::timeout`] still covers the entire
+/// exchange; this companion neither renews it nor adds a grace period.
+///
+/// The stream remains borrowed and is never closed or shut down here. The
+/// caller must retire it after interruption or other partial failure: consumed
+/// request bytes, emitted response bytes and handler effects cannot be undone.
+/// Dropping this future also drops its inline work. Synchronous handler/carrier
+/// work must arrange its own preemption; cancellation is cooperative.
+pub async fn serve_connection_until_shutdown<S>(
+    stream: &mut S,
+    handler: &impl Handler,
+    config: &ServerConfig,
+    shutdown: impl Future<Output = ()>,
+) -> io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    tokio::select! {
+        biased;
+        _ = shutdown => Err(io::Error::new(io::ErrorKind::Interrupted, "Scroll exchange interrupted")),
+        result = serve_connection(stream, handler, config) => result,
+    }
+}
+
 async fn read_request<S: AsyncRead + Unpin>(
     stream: &mut S,
     max_request_bytes: usize,
@@ -128,6 +156,10 @@ async fn read_request<S: AsyncRead + Unpin>(
     }
     Ok(None)
 }
+
+#[cfg(test)]
+#[path = "server_shutdown_tests.rs"]
+mod server_shutdown_tests;
 
 #[cfg(test)]
 mod tests {
