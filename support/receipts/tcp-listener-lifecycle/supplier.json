@@ -1,0 +1,306 @@
+{
+  "schema": "tcp-listener-lifecycle-qualification-v1",
+  "date": "2026-10-23",
+  "owner": "Five native TCP protocol listener APIs",
+  "qualified_source": "7b7a9bfd6a8ec7c313cfa525a63a7ca29c11afaa",
+  "qualified_tree": "b91219ae8990d3afbd62a4da97375a11e961828f",
+  "base_source": "d605afecf405862a5025ee4a048bcf6f1ed78463",
+  "crate_trees": {
+    "gemini-protocol": "c4558a43834955041b3f8524126a67edf4eedc24",
+    "gopher-protocol": "a8c9f480df9c95cfc5f34f275f6abd960e677b45",
+    "finger-protocol": "184099303ba811c9d77484756cac2f0dab61999e",
+    "nex-protocol": "f69d4b89cd0574439c64eff021bd3ae73f5f6fc1",
+    "spartan-protocol": "8baeba5e594567bd271a811a618a72ce17448e21"
+  },
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "git_lock_blob": "aeee95e98a7f49618dd4be4316ea477a112a2268",
+  "lock_delta": "None. Only existing Tokio dev-dependency features sync/test-util were enabled for tests; production dependency features, registry versions and checksums are unchanged.",
+  "native_source_sha256": {
+    "crates/gemini-protocol/Cargo.toml": "b71feac799f42b6508233aff4526bcd8c74bead0e85c6c4b25a41d824c5c2c0a",
+    "crates/gemini-protocol/README.md": "5a8e2b17bd59e1bca24ebe6f2869faea6c0d861660e36a77fab8e4d1b7354c13",
+    "crates/gemini-protocol/src/server.rs": "e76331849605f0e6c660ef6f940ed07c3c96718a13b4ca22a6c739f86bb22e3b",
+    "crates/gemini-protocol/src/server_lifecycle_tests.rs": "f3ed819ecd625fd219a24d010fb6d0b7753560cb735d3fb9d74f39f7daf9c5b5",
+    "crates/gopher-protocol/Cargo.toml": "fae1492fd0364f86335727422c1166db875dc830a475a0f460055b0389a61153",
+    "crates/gopher-protocol/README.md": "dd0acc26b89ca626da8ad6715dc543814261dd052f80ce2ff7d238046299a48f",
+    "crates/gopher-protocol/src/server.rs": "7bbd8978ffccddbc4955efa184443c86b04350da88fb696161687c67064931d1",
+    "crates/gopher-protocol/src/server_lifecycle_tests.rs": "90177b60395c1fd6de0a1228fba676904f1817437c27bf266c593fce454872a7",
+    "crates/finger-protocol/Cargo.toml": "b4ef9d3c853e419d4d30741e471f1125852878b283883d946fa4041fb496b9db",
+    "crates/finger-protocol/README.md": "62e7359495dc51f1ab7436b27e983fe2679df96463d0cffcc54ff89e36cb32e6",
+    "crates/finger-protocol/src/server.rs": "5b15ecfe9fc03c04955e2b71794616701f960a636f60e759d9b33319ced54ca5",
+    "crates/finger-protocol/src/server_lifecycle_tests.rs": "eacad0257318296ae51af0039c3a94ea621967bfd5bc8b8e263e9a66823c4459",
+    "crates/nex-protocol/Cargo.toml": "4c29961cbfc755cc21990fea916515e0efbfddca6f1a00865c3e1efc244bf50c",
+    "crates/nex-protocol/README.md": "1dcb029622ce4bbd3ddab501aeb457358ba568ad843dbc9ee6750b94d4d02843",
+    "crates/nex-protocol/src/server.rs": "c930db2343ab6b2731f010cf26ce2c25ba02adeda3453ee0b0cd5631844b9c81",
+    "crates/nex-protocol/src/server_lifecycle_tests.rs": "736db4e1021ac239836458a563bdd134761fcd67aa9ddd93a1f2a38589fe5248",
+    "crates/spartan-protocol/Cargo.toml": "2a9ea0d017f6be2285d144d017794b5f12c7d004aeb8a874bed723fd9517d56e",
+    "crates/spartan-protocol/README.md": "70db0c83f97977ae97e93ef66289ca8b2e46a8e6bfbb1b00d2b0b771560f9ed7",
+    "crates/spartan-protocol/src/server.rs": "431b9dca1a627e34a4597137caf6895053b025ac8de04708cb61876b34084755",
+    "crates/spartan-protocol/src/server_lifecycle_tests.rs": "ea93f15e86068ba8b39f1738ce79725bd62cd2a324c624cbf86eb40e86bdad1b"
+  },
+  "native_pipeline_comparison": {
+    "method": "Compare continuous production section starting at async fn handle_connection and ending before the first following #[cfg(test)], after CRLF-to-LF normalization and trimming final whitespace only. Baseline d605afec; exact text equality includes native parsing, timeout calls, wire writes, close and file handlers present in those sections.",
+    "results": {
+      "gemini-protocol": {
+        "equal": true,
+        "sha256": "0a17a6347b4174aaa7ab3d2280d880f65e34b400470d54158926e07f70b2cf53"
+      },
+      "gopher-protocol": {
+        "equal": true,
+        "sha256": "4a573bd7d21f02073b78571db432893bbb4faa71bfef1348ef3fff5976b81987"
+      },
+      "finger-protocol": {
+        "equal": true,
+        "sha256": "12eca8a3b31cb0c4955d4d259fb301283a468da932bc9a6fcd3e3a2248b4ee55"
+      },
+      "nex-protocol": {
+        "equal": true,
+        "sha256": "ac400a39aace0ed1d23051a80210aac58b44142bec18ea934a1e2e923ab069af"
+      },
+      "spartan-protocol": {
+        "equal": true,
+        "sha256": "b56288e6c91bb44416ea2181205d6f1e619bda4756241910ff8514f19714ad88"
+      }
+    },
+    "note": "Gemini TLS acceptor/client-certificate policy and existing request/response types were also unchanged in source review. Lifecycle imports/config/serve/task helpers are outside this comparison."
+  },
+  "toolchain": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo 1.99.1 (5f94df478 2026-08-27)"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "C:\\t\\cargo-targets\\smolweb",
+    "CARGO_BUILD_BUILD_DIR": "C:\\t\\cargo-targets\\smolweb\\build",
+    "note": "All root Cargo gates explicitly used --locked --offline and both directory variables. Agents ran no Cargo."
+  },
+  "commands": [
+    {
+      "command": "cargo test -p gemini-protocol -p gopher-protocol -p finger-protocol -p nex-protocol -p spartan-protocol --all-features --locked --offline lifecycle_tests --quiet",
+      "exit_code": 0,
+      "new_lifecycle_passed": 39,
+      "by_crate": {
+        "gemini-protocol": 8,
+        "gopher-protocol": 9,
+        "finger-protocol": 9,
+        "nex-protocol": 7,
+        "spartan-protocol": 6
+      },
+      "note": "Focused recovery pass before final startup-barrier/exact-elapsed and test-initializer refinements. Final complete cohort below covers the final test source."
+    },
+    {
+      "command": "cargo test -p gemini-protocol -p gopher-protocol -p finger-protocol -p nex-protocol -p spartan-protocol -p errand -p misfin --all-features --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 313,
+      "integration_passed": 14,
+      "doctest_passed": 13,
+      "failed": 0,
+      "ignored": 1,
+      "by_owner": {
+        "errand": {
+          "unit": 69,
+          "integration": 14,
+          "doc": 1,
+          "ignored": 1
+        },
+        "finger-protocol": {
+          "unit": 26,
+          "doc": 4
+        },
+        "gemini-protocol": {
+          "unit": 54,
+          "doc": 1
+        },
+        "gopher-protocol": {
+          "unit": 50,
+          "doc": 5
+        },
+        "misfin-library": {
+          "unit": 82,
+          "doc": 0
+        },
+        "misfin-cli": {
+          "unit": 1
+        },
+        "nex-protocol": {
+          "unit": 13,
+          "cli_unit": 0,
+          "doc": 1
+        },
+        "spartan-protocol": {
+          "unit": 18,
+          "cli_unit": 0,
+          "doc": 1
+        }
+      },
+      "note": "Normal parallel harness passes. Existing live Nex ignore unchanged. Misfin/Errand regressions included; no claim of a newly qualified installed CLI/product process."
+    },
+    {
+      "command_template": "cargo test -p <crate> --no-default-features --locked --offline --quiet [--features server]",
+      "scope": "Five independent minimal server test invocations. Gemini/Gopher/Finger enable server explicitly; Nex/Spartan network servers are always present. Counts overlap the complete cohort rather than adding distinct cases.",
+      "unit_passed": 141,
+      "doctest_passed": 8,
+      "failed": 0,
+      "results": [
+        { "crate": "gemini-protocol", "features": "server", "unit": 54, "doc": 1, "exit_code": 0 },
+        { "crate": "gopher-protocol", "features": "server", "unit": 41, "doc": 4, "exit_code": 0 },
+        { "crate": "finger-protocol", "features": "server", "unit": 15, "doc": 1, "exit_code": 0 },
+        { "crate": "nex-protocol", "features": "network-library", "unit": 13, "doc": 1, "exit_code": 0 },
+        { "crate": "spartan-protocol", "features": "network-library", "unit": 18, "doc": 1, "exit_code": 0 }
+      ]
+    },
+    {
+      "command_template": "cargo check -p <crate> --no-default-features --locked --offline --quiet [--features <feature>]",
+      "scope": "Eighteen independent final-source feature checks. core/default-free means no features; Nex/Spartan network library is always compiled, not grammar-only.",
+      "results": [
+        {
+          "crate": "gemini-protocol",
+          "features": "core",
+          "exit_code": 0
+        },
+        {
+          "crate": "gemini-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "gemini-protocol",
+          "features": "tls",
+          "exit_code": 0
+        },
+        {
+          "crate": "gemini-protocol",
+          "features": "server",
+          "exit_code": 0
+        },
+        {
+          "crate": "gopher-protocol",
+          "features": "core",
+          "exit_code": 0
+        },
+        {
+          "crate": "gopher-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "gopher-protocol",
+          "features": "tls",
+          "exit_code": 0
+        },
+        {
+          "crate": "gopher-protocol",
+          "features": "server",
+          "exit_code": 0
+        },
+        {
+          "crate": "finger-protocol",
+          "features": "core",
+          "exit_code": 0
+        },
+        {
+          "crate": "finger-protocol",
+          "features": "client",
+          "exit_code": 0
+        },
+        {
+          "crate": "finger-protocol",
+          "features": "webfinger",
+          "exit_code": 0
+        },
+        {
+          "crate": "finger-protocol",
+          "features": "server",
+          "exit_code": 0
+        },
+        {
+          "crate": "nex-protocol",
+          "features": "network-library",
+          "exit_code": 0
+        },
+        {
+          "crate": "nex-protocol",
+          "features": "cli",
+          "exit_code": 0
+        },
+        {
+          "crate": "spartan-protocol",
+          "features": "network-library",
+          "exit_code": 0
+        },
+        {
+          "crate": "spartan-protocol",
+          "features": "cli",
+          "exit_code": 0
+        },
+        {
+          "crate": "errand",
+          "features": "default-free",
+          "exit_code": 0
+        },
+        {
+          "crate": "errand",
+          "features": "serve",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "command": "cargo clippy -p gemini-protocol -p gopher-protocol -p finger-protocol -p nex-protocol -p spartan-protocol --all-features --all-targets --locked --offline --quiet --no-deps -- -D warnings",
+      "exit_code": 0,
+      "strict": true
+    },
+    {
+      "command": "rustfmt --edition 2024 --config skip_children=true --check crates/gemini-protocol/src/server_lifecycle_tests.rs crates/gopher-protocol/src/server_lifecycle_tests.rs crates/finger-protocol/src/server.rs crates/finger-protocol/src/server_lifecycle_tests.rs crates/nex-protocol/src/server.rs crates/nex-protocol/src/server_lifecycle_tests.rs crates/spartan-protocol/src/server.rs crates/spartan-protocol/src/server_lifecycle_tests.rs",
+      "exit_code": 0,
+      "scope": "Eight changed Rust files."
+    },
+    {
+      "command": "rustfmt --edition 2024 --config skip_children=true --check crates/gemini-protocol/src/server.rs crates/gopher-protocol/src/server.rs",
+      "exit_code": 1,
+      "qualified": false,
+      "note": "Three unchanged baseline formatting wraps only: Gemini oversized reply call and original header assertion; Gopher parse_request search chain. Preserve those lines so the native section remains exact. This is qualified formatting evidence, not a blanket whole-file formatting pass."
+    },
+    {
+      "command": "git diff --cached --check",
+      "exit_code": 0
+    }
+  ],
+  "policy": {
+    "configuration": "Each native ServerConfig independently adds max_connections default 32 (nonzero) and shutdown_grace default 5s (zero allows immediate cancellation). These are separate from each existing native timeout setting.",
+    "validation": "New fields fail with protocol-specific io::ErrorKind::InvalidInput before acceptance/handler work. Listener and Gemini TLS acceptor are supplied by the caller; validation does not precede caller bind/acceptor construction.",
+    "admission": "Local JoinSet length guards acceptance before spawning. Completed but unreaped tasks conservatively retain capacity until reaped. Pausing accept subjects pending peers to OS backlog limits; no overload status/body is invented.",
+    "shutdown": "Prioritize shutdown, then completed joins, then accepts. Fix absolute grace deadline when shutdown is observed, drop listener, let admitted work finish until that deadline, then abort all remaining tasks and await terminal joins.",
+    "cancellation": "Signal shutdown and await serve for joined cleanup. Dropping serve requests child cancellation through the owned task set but cannot await termination. Async abort/grace cannot preempt synchronous handler work or undo effects already performed, including Spartan uploads.",
+    "preserved_deadlines": {
+      "gemini-protocol": "Existing TLS handshake and per-read timers remain at their original sites; handler/reply/close behavior unchanged.",
+      "gopher-protocol": "Existing per-read selector timing, Gopher+ request facts and native length header unchanged; handler/write/close behavior unchanged.",
+      "finger-protocol": "Existing per-read query timing, /W verbosity and valid EOF/listing behavior unchanged; handler/write/close behavior unchanged.",
+      "nex-protocol": "Existing selector read/reply write timers, bare LF behavior and opaque headerless bytes unchanged.",
+      "spartan-protocol": "Existing request/read_exact body/reply write timers, declared content length, upload refusal, native status/MIME/body and side effects unchanged."
+    },
+    "scope": "Per-listener accepted-task policy only. No common transaction deadline or new generic runtime/framework, global memory/traffic quota, per-peer limit or product residency policy."
+  },
+  "coverage": {
+    "new_cases": 39,
+    "native": "Actual localhost TLS for Gemini and TCP for all plaintext protocols qualify handler-backed admission barriers, held capacity/queued next request, exact graceful response bytes, forced/zero-grace handler cancellation and observed peer closure. Gemini additionally holds native TLS handshake using ClientHello/ServerHello.",
+    "protocol_facts": "Gemini status/MIME/body; Gopher+ selector/search/form and length-prefixed binary body; Finger verbose query and exact bytes; Nex bare-LF selector and opaque bytes; Spartan host/path/declared body and exact status/MIME/body with retained submission effect.",
+    "controlled": "Paused-time tasks use explicit starts/drop guards, graceful/pending children, controlled panics, exact fixed grace and already-expired drain polling. Peer close accepts native EOF/reset/abort outcomes; a timeout is not closure.",
+    "limits": "Native in-process supplier TCP/TLS, not independent remote readers, installed CLI signals, headed product UI, radio or separate machines. Shutdown grace is a graceful opportunity, not hard preemption of synchronous code. Existing native per-I/O timing is intentionally not promoted to a whole-operation server deadline."
+  },
+  "consumer_audit": {
+    "knot": "Known Gemini/Spartan configs in knot-editor/crates/knot-site/src/local.rs use ..Default::default(), so added fields do not require source repair there. Their pinned older cohorts have not adopted this behavior; receiving/runtime qualification remains a separate repin slice.",
+    "compatibility": "New public ServerConfig fields require additions in downstream exhaustive literals without ..Default. No active such caller was found in the inspected workspace owner paths; no product pins or source were changed.",
+    "djinn": "Existing custom governed listeners/task ownership remain independent; no native serve adoption forced on Djinn.",
+    "other_family": "Misfin already qualified and unchanged. Guppy inline UDP responsiveness and caller-owned Scroll/Scorpion exchanges remain separate contracts. Errand Source adapters/routing unchanged."
+  },
+  "preliminary": "preliminary.json records compilation wiring/type errors, the incorrect drain fixture, focused-filter omission and strict test-style repairs. Final complete source qualification above is separate.",
+  "resources": {
+    "shared_evidence_cap_bytes": 100000000,
+    "retained": "Compact JSON and byte-preserving attributes only; no copied executables or full logs.",
+    "new_isolated_targets": [],
+    "new_cargo_homes": [],
+    "new_worktrees": [],
+    "prior_cache": "Earlier receiving-lane policy-blocked smolweb/target/build cache remains preserved; this task generated no new output there and does not retry its rejected cleanup."
+  },
+  "preserved": "Cargo.lock, Misfin, Errand facade, other protocol source, site snapshot V1, product pins and previous receipts unchanged.",
+  "byte_convention": "Native SHA256 identifies Windows bytes; Git commit/tree/blob identifies normalized repository content. JSON/attributes are UTF-8 LF under -text. Qualification commit changes docs/receipts only."
+}

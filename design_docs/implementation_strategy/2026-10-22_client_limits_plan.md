@@ -1,14 +1,14 @@
 # Client receive limits
 
-**Status (2026-10-23):** phases 1 to 9 landed and qualified: routed clients,
+**Status (2026-10-23):** phases 1 to 10 landed and qualified: routed clients,
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
 size and framing limits, native session operation deadlines, and Misfin sending
-and receiving deadlines, plus native Misfin admission and joined shutdown.
+and receiving deadlines, plus native Misfin, Gemini, Gopher, Finger, Nex and
+Spartan admission and joined shutdown.
 Whole-transaction, step, connection-count and shutdown-grace policies remain
-independently configurable. Sibling server lifecycle policies stay separately
-scoped.
-Phase 10 is in progress for native Gemini, Gopher, Finger, Nex and Spartan
-admission/joined shutdown, preserving each protocol's existing timing semantics.
+independently configurable. Each protocol's native timing and request semantics
+remain distinct. Guppy inline responsiveness and caller-owned Scroll/Scorpion
+exchanges retain separate lifecycle contracts.
 
 ## Ownership and scope
 
@@ -171,9 +171,10 @@ receipts. New receipt hashes must state their Git/native byte convention.
   Their runtime shutdown behavior requires separate qualification at adoption;
   this supplier slice makes no product-repin or installed-host claim. Djinn's
   custom governed listener remains independently owned by its existing policy.
-- The native family survey finds detached accepted tasks in Misfin, Gemini,
-  Gopher, Finger, Nex and Spartan. Their handler and I/O deadlines differ, so
-  this phase qualifies Misfin first. Guppy's inline UDP loop already bounds
+- At the phase 9 baseline, the family survey found detached accepted tasks in
+  Misfin, Gemini, Gopher, Finger, Nex and Spartan. Phase 9 qualified Misfin;
+  phase 10 qualifies the other five without unifying their handler/I/O timing.
+  Guppy's inline UDP loop already bounds
   peer sessions; its inline handler/shutdown responsiveness is separate work.
   Scroll and Scorpion exchange over caller-owned streams and must retain that
   ownership. Errand's `serve` adapters do not own listener lifetime.
@@ -303,6 +304,28 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: source `7b7a9bfd` completes phase 10. The full supplier cohort
+  passes 313 unit tests, 14 integration tests and 13 doctests, including Errand
+  and Misfin regressions, with the existing live Nex ignore. All 39 new lifecycle
+  cases pass. Eighteen independent feature builds and strict all-target Clippy
+  pass for the five changed native owners. Separate minimal server test graphs
+  pass 141 unit tests/eight doctests; these overlap the complete cohort. Native
+  connection-handling/parse/write sections are text-identical to `d605afec`
+  after line-ending normalization, with exact hashes in the
+  [TCP listener supplier receipt](../../support/receipts/tcp-listener-lifecycle/supplier.json).
+  Eight changed Rust files pass formatting directly; three pre-existing wraps
+  in Gemini/Gopher server files remain recorded as baseline exceptions. The
+  [preliminary record](../../support/receipts/tcp-listener-lifecycle/preliminary.json)
+  preserves module/type compilation repairs, corrected drain-test expectations
+  and test initializer lint corrections. Native TCP/TLS fixtures retain exact
+  protocol bytes and submission effects through graceful shutdown; controlled
+  tests qualify cancellation/drop/panic joining and fixed observed deadlines.
+  Only existing dev Tokio sync/test-util features were enabled; Cargo.lock,
+  registry data, Misfin, facade routing, product pins and previous receipts are
+  unchanged. New compact evidence retains 20,910 bytes, using the stable target
+  and build directory with no new isolated roots. Known Knot config defaults
+  are source-compatible; actual product adoption remains a separate gate.
 
 - 2026-10-23: started phase 10 on smolweb main. Three bounded Luna lanes own
   Gemini, Gopher/Finger and Nex/Spartan source, focused tests and crate docs;
