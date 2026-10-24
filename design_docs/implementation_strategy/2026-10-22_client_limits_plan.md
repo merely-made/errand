@@ -1,16 +1,15 @@
 # Client receive limits
 
-**Status (2026-10-23):** phases 1 to 10 landed and qualified: routed clients,
+**Status (2026-10-23):** phases 1 to 11 landed and qualified: routed clients,
 native Micron limits, browser receiving, and standalone DICT/FSP/Kepler/Text
 size and framing limits, native session operation deadlines, and Misfin sending
 and receiving deadlines, plus native Misfin, Gemini, Gopher, Finger, Nex and
-Spartan admission and joined shutdown.
+Spartan admission and joined shutdown, plus Guppy's inline UDP shutdown.
 Whole-transaction, step, connection-count and shutdown-grace policies remain
 independently configurable. Each protocol's native timing and request semantics
-remain distinct. Guppy inline responsiveness and caller-owned Scroll/Scorpion
-exchanges retain separate lifecycle contracts.
-Phase 11, Guppy's inline UDP shutdown responsiveness, is in progress. Scroll
-and Scorpion caller-owned exchanges remain outside this slice.
+remain distinct. Guppy retains its native UDP session contract without a TCP
+grace policy. Scroll and Scorpion caller-owned exchanges remain separately
+scoped.
 
 ## Ownership and scope
 
@@ -210,8 +209,8 @@ receipts. New receipt hashes must state their Git/native byte convention.
 - At the phase 9 baseline, the family survey found detached accepted tasks in
   Misfin, Gemini, Gopher, Finger, Nex and Spartan. Phase 9 qualified Misfin;
   phase 10 qualifies the other five without unifying their handler/I/O timing.
-  Guppy's inline UDP loop already bounds
-  peer sessions; its inline handler/shutdown responsiveness is separate work.
+  Guppy's inline UDP loop already bounded peer sessions; phase 11 qualifies
+  whole-engine shutdown while retaining those UDP semantics.
   Scroll and Scorpion exchange over caller-owned streams and must retain that
   ownership. Errand's `serve` adapters do not own listener lifetime.
 - Djinn already composes native exchanges with host-owned policy, capacity
@@ -340,6 +339,24 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-23: source `c63c8c50` completes phase 11. Guppy/Errand pass 88 unit
+  tests, 14 integration tests and two doctests, with the existing live Nex
+  ignore. Guppy's independent minimum graph passes 19 unit tests/one doctest;
+  four feature checks, strict all-target Guppy Clippy and changed-file formatting
+  pass. Eight new controls qualify ready-stop precedence, native pending-handler
+  cancellation and socket release, cooperative input-flood responsiveness,
+  deterministic pending-I/O cancellation, exact window/ACK/retransmit behavior,
+  completed linger, creation-based expiry/cap, zero-window and unacked-stop
+  behavior. The [Guppy supplier receipt](../../support/receipts/guppy-shutdown/supplier.json)
+  retains source/tree/native hashes and scope: real UDP kernel-send saturation
+  was not forced, and synchronous work is not preemptible. Native helper and
+  tick/receive branch sections match the baseline after documented wrapper-only
+  normalization. Public API/config, manifests, Cargo.lock, clients, other native
+  protocols, product pins and prior evidence are unchanged. No new background
+  tasks, grace setting, shutdown packet or ACK drain were added. New compact
+  evidence retains 9,631 bytes using the stable target/build directory; no new
+  isolated roots. Scroll and Scorpion remain in their caller-owned lane.
 
 - 2026-10-23: started phase 11 in Guppy only. Root owns production/tests/docs and
   Cargo gates, with a bounded Luna read-only protocol/cancellation review.

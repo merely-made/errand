@@ -1,0 +1,166 @@
+{
+  "schema": "guppy-shutdown-qualification-v1",
+  "date": "2026-10-23",
+  "owner": "Guppy native inline UDP engine",
+  "qualified_source": "c63c8c504ad164343f2910979b7d12a0744aa7fb",
+  "qualified_tree": "eb6b9a5f0ea13ed55685c2ef6abf84dab549cbf1",
+  "guppy_crate_tree": "77a1dad0da11d40046a076148147d7f2f8e08011",
+  "base_source": "e57f63708023bda5d6b1cf217cd3d703ba496920",
+  "native_lock_sha256": "85d893df95cd94d29c673bfaed1f51e06864c9fb80ba078ac56213c14eb756cc",
+  "git_lock_blob": "aeee95e98a7f49618dd4be4316ea477a112a2268",
+  "dependency_delta": "None. Cargo.lock and all manifests/production/dev features are unchanged.",
+  "native_source_sha256": {
+    "crates/guppy-protocol/src/server.rs": "31feabdcc70fd72e79f495179587c39383b3071dc02ce8ea054e6052a4f9f69c",
+    "crates/guppy-protocol/src/server_shutdown_tests.rs": "90c84593e5fa44bda675dafbebb3d401d0c34423a0a22a12c4ac9b9db624c460",
+    "crates/guppy-protocol/README.md": "b8e1fe1ab15cf49a9c7a5c162c15d8fa4f58e4a84387fa939fbc98779ee016e1"
+  },
+  "toolchain": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "cargo 1.99.1 (5f94df478 2026-08-27)"
+  ],
+  "environment": {
+    "CARGO_TARGET_DIR": "C:\\t\\cargo-targets\\smolweb",
+    "CARGO_BUILD_BUILD_DIR": "C:\\t\\cargo-targets\\smolweb\\build",
+    "note": "All Cargo gates explicitly set both directories and use --locked --offline; the read-only Luna lane ran no Cargo."
+  },
+  "commands": [
+    {
+      "command": "cargo test -p guppy-protocol --all-features --locked --offline server_shutdown_tests --quiet",
+      "exit_code": 0,
+      "new_cases_passed": 8,
+      "failed": 0,
+      "filtered": 11,
+      "note": "Initial focused pass; the full and minimal suites below qualify final source after a test-label and README update."
+    },
+    {
+      "command": "cargo test -p guppy-protocol -p errand --all-features --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 88,
+      "integration_passed": 14,
+      "doctest_passed": 2,
+      "failed": 0,
+      "ignored": 1,
+      "by_owner": {
+        "errand": {
+          "unit": 69,
+          "integration": 14,
+          "doc": 1,
+          "ignored": 1
+        },
+        "guppy-protocol": {
+          "unit": 19,
+          "cli_unit": 0,
+          "doc": 1,
+          "ignored": 0
+        }
+      },
+      "note": "Normal parallel harness passes; existing live Nex ignore unchanged."
+    },
+    {
+      "command": "cargo test -p guppy-protocol --no-default-features --locked --offline --quiet",
+      "exit_code": 0,
+      "unit_passed": 19,
+      "doctest_passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "note": "Independent minimum Guppy network-library test graph without CLI or facade feature unification. Overlaps full cohort, not additional unique cases."
+    },
+    {
+      "command_template": "cargo check -p <crate> --no-default-features --locked --offline --quiet [--features <feature>]",
+      "scope": "Four independent invocations; Guppy always includes native networking, not grammar-only.",
+      "results": [
+        {
+          "crate": "guppy-protocol",
+          "features": "network-library",
+          "exit_code": 0
+        },
+        {
+          "crate": "guppy-protocol",
+          "features": "cli",
+          "exit_code": 0
+        },
+        {
+          "crate": "errand",
+          "features": "default-free",
+          "exit_code": 0
+        },
+        {
+          "crate": "errand",
+          "features": "serve",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "command": "cargo clippy -p guppy-protocol --all-features --all-targets --locked --offline --quiet --no-deps -- -D warnings",
+      "exit_code": 0,
+      "strict": true
+    },
+    {
+      "command": "rustfmt --edition 2024 --config skip_children=true --check crates/guppy-protocol/src/server.rs crates/guppy-protocol/src/server_shutdown_tests.rs",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --cached --check",
+      "exit_code": 0
+    }
+  ],
+  "implementation": {
+    "boundary": "Public serve passes its entire owned serve_loop future to one shutdown-biased run_until_shutdown select. The loop still handles one handler inline; there are no spawned peer tasks, extra admission rules, grace interval, shutdown packet or ACK drain.",
+    "await_coverage": [
+      "UDP receive/timer waiting",
+      "handler.handle(request)",
+      "malformed URL reply",
+      "Prompt/Redirect/Error send_to",
+      "initial open_window sends",
+      "ACK acknowledge -> open_window sends",
+      "tick retransmit sends"
+    ],
+    "ownership": "When shutdown is observed the inline engine future is dropped, including its current handler, socket, receive buffer and complete session table, before serve returns. This is inline cancellation/destruction, not a task-join or completed-delivery claim.",
+    "cooperative": "The outer guard is re-polled after the engine yields Pending. A poll may process multiple immediately-ready operations; synchronous or non-yielding work cannot be preempted. Already performed effects or emitted datagrams cannot be recalled, and queued datagrams may still arrive.",
+    "normal_behavior": "Existing peer-address sessions, duplicate suppression, session cap, packets/random sequence, ACK/window/retransmit behavior, timer clocks and FileHandler remain unchanged. Native send-error handling and existing zero-window/zero-cap semantics are retained."
+  },
+  "native_comparison": {
+    "baseline": "e57f6370",
+    "helpers": {
+      "equal": true,
+      "sha256": "d2f7642d34ba8e352172f2cb0c34394598b7bfd4ed8b089c237bd484a7598617",
+      "method": "Normalize CRLF to LF and trim final whitespace. Compare fn parse_request through the first following #[cfg(test)], including build_session/random_seq/open_window/acknowledge/retransmit/FileHandler."
+    },
+    "loop_branches": {
+      "equal": true,
+      "sha256": "3239fef262eea5e96882f4c73b46eba58a1cb6b8b0d117610d4ca5b05567e1ba",
+      "method": "Normalize CRLF to LF. Compare the tick branch start through the end of engine before fn parse_request; remove only the old enclosing function's final four-space Ok(()) line and trim final whitespace. Old shutdown select arm/outer function setup are deliberately outside this branch comparison."
+    },
+    "config": "No ServerConfig/API/dependency/clock migration. The session table still uses std::time::Instant and retains creation-based timeout, last_send behavior and DONE_LINGER5s."
+  },
+  "coverage": {
+    "new_case_count": 8,
+    "cases": [
+      "Ready shutdown wins over a queued native request before the engine is polled; no handler call or reply, owned UDP address can be rebound.",
+      "A known-started pending handler drops before return, keeps its already-applied effect, and does not allow a second peer handler to run in parallel.",
+      "The same whole-engine guard cancels genuinely pending AsyncWrite on a capacity-one duplex stream; guard drops and existing first-byte output remains. Terminal operation errors still propagate.",
+      "Native continuous ready-request input does not prevent shutdown on the tested Tokio/Windows runtime.",
+      "Native first/continuation/EOF bytes, input decoding, window advance, duplicate/unknown ACKs, duplicate requests, exact retransmission and completed-session linger.",
+      "Native peer session cap, release on creation-based timeout even after ACK progress.",
+      "Existing zero-window behavior: silent but live capped session, duplicate suppression and prompt stop.",
+      "Unacked native response retransmits before stop; stop discards session without waiting for EOF ACK. Already-queued local datagrams are drained before observing retransmission cessation."
+    ],
+    "limits": "No native UDP kernel-send saturation/backpressure was forced. Deterministic pending AsyncWrite qualifies the shared cancellation guard, while source audit confirms every UDP send path lies beneath it. This does not claim partial UDP datagrams or hard realtime preemption. Actual UDP evidence is localhost/in-process, not installed CLI signal handling, public peers, radio or independent machines."
+  },
+  "review": "A bounded read-only Luna review checked the whole-engine ownership, every await path, native session quirks and fixture boundaries; no blocker found. Review and docs retain the hot-poll/cooperative and non-native-backpressure qualifications.",
+  "scope": {
+    "changed": "Guppy shutdown cancellation boundary, focused tests, native README and canonical plan/index. README home corrected to continuing Errand repository.",
+    "unchanged": "Scroll and Scorpion caller-owned exchanges, all TCP listener policy, Errand routes/adapters, Guppy client/packet implementation, config/defaults, product pins, site snapshot V1 and older receipts.",
+    "consumer": "Workspace owner-path search found no direct native Guppy serve caller beyond its existing crate CLI/tests; no product repin or host composition is implied."
+  },
+  "resources": {
+    "shared_evidence_cap_bytes": 100000000,
+    "retained": "Compact JSON and byte-preserving attribute only; no full captures/logs or copied binaries.",
+    "new_isolated_targets": [],
+    "new_cargo_homes": [],
+    "new_worktrees": [],
+    "prior_cache": "Prior policy-blocked receiving build cache under smolweb/target/build is preserved; this task creates no output there and does not retry rejected cleanup."
+  },
+  "byte_convention": "Native SHA256 identifies Windows source bytes; Git source/tree/blob identifies normalized repository content. JSON and attributes are UTF-8 LF under -text. Qualification commit changes docs/receipts only."
+}
