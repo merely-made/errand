@@ -242,7 +242,7 @@ receipts. New receipt hashes must state their Git/native byte convention.
   own listener lifetime.
 - Djinn already composes native exchanges with host-owned policy, capacity
   controls and Armillary `ResidentTasks::close_and_join` in
-  `mere/ports/djinn/src/resident_site.rs`, `moot_site.rs` and `micron_site.rs`.
+  `mere/ports/mere-resident/src/resident_site.rs` (formerly `ports/djinn`), `moot_site.rs` and `micron_site.rs`.
   The native Misfin listener uses its existing Tokio dependency to own a local
   bounded task set; this adds no generic runtime or dependency on host actors.
   At capacity, native Misfin pauses acceptance rather than fabricating a mail
@@ -366,6 +366,15 @@ receipts. New receipt hashes must state their Git/native byte convention.
   smolweb. Existing explicit Submit guards must remain effective at every hop.
 
 ## Progress
+
+- 2026-10-31: Knot adopted this cohort. Its Gemini and Spartan listeners pin
+  Errand `897fb963`, and Knot's small-web authoring plan records the slice as
+  implemented and qualified at Knot `2474686`; its consumer receipt
+  (`knot-editor/support/receipts/errand-adoption/consumer.json`) cites
+  `support/receipts/tcp-listener-lifecycle/supplier.json` and covers graceful
+  stop, zero grace and grace expiry through stop and Drop. This supersedes the
+  2026-10-23 finding that Knot had not acquired these changes. Mere's resident
+  host and Turnstone adoption remain separately owned and open.
 
 - 2026-10-23: phase 12 source `34e2c3c4` adds native Scroll/Scorpion
   `serve_connection_until_shutdown` companions, returning `Interrupted` on
@@ -608,8 +617,8 @@ receipts. New receipt hashes must state their Git/native byte convention.
   Completed read-only research lanes before assigning bounded implementation
   owners. Browser receiving, Micron hosting and snapshot V1 are prior slices;
   their receipts are preserved. Related receiving/hosting queue:
-  `mere/design_docs/mere_docs/implementation_strategy/2026-10-20_shared_site_model_plan.md`;
+  `mere/design_docs/mere_docs/implementation_strategy/2026-10-28_site_publication_plan.md` (cut 2026-10-28 from the shared site model plan);
   native Resource work:
-  `retinue/design_docs/2026-08-04_smolweb_over_reticulum_plan.md`;
+  `murm/design_docs/2026-08-04_smolweb_over_reticulum_plan.md`;
   product receiving:
   `turnstone/design_docs/2026-10-06_unusual_protocols_browser_plan.md`.

@@ -66,7 +66,7 @@ source/test results only, under a shared 100 MB cap across this orchestration.
   integration. Supplier code at local `50702b440` matches pinned `dce1f085`
   throughout `crates`. Selected this bounded Scroll extraction first. Broader
   owner queues and future resident gates remain canonical in
-  `mere/design_docs/mere_docs/implementation_strategy/2026-10-20_shared_site_model_plan.md`.
+  `mere/design_docs/mere_docs/implementation_strategy/2026-10-28_site_publication_plan.md`, cut 2026-10-28 from the shared site model plan.
 - 2026-10-21: supplier feature gates pass: no features 32 unit tests plus one
   doctest; server-only 38 plus one; server/client and all features each 43 plus
   two. Strict all-targets no-deps Clippy passes. Feature-gated client import and

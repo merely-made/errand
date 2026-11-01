@@ -4,7 +4,7 @@ Small-web protocols and scheme-routed client/server integration, continuing the 
 
 This repository preserves the implementation history promoted from Mere on 2026-10-19. Crates retain their names, APIs, licenses and selectable features.
 
-Canonical migration: `mere/design_docs/mere_docs/implementation_strategy/2026-10-19_family_promotion_plan.md`.
+Canonical migration: `mere/design_docs/archive_docs/2026-10-28/2026-10-19_family_promotion_plan.md` (archived 2026-10-28).
 
 | Crate | Source |
 |---|---|
