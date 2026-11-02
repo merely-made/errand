@@ -583,7 +583,7 @@ receipts. New receipt hashes must state their Git/native byte convention.
   Read/Submit encoded, packed and body budgets. The two existing external-host
   and isolated R3 prerequisite tests remain ignored. Canonical receipts:
   `mere/support/receipts/client-limits/consumer.json` and
-  `turnstone/support/receipts/client-limits/consumer.json`. Their source-only
+  `Code/testing/turnstone/support_receipts/client-limits/consumer.json`. Their source-only
   lock substitutions preserve registry versions and unrelated suppliers.
   The earlier pure-preflight timer regression and Windows held-EOF fixture
   failure are repaired and retained separately in Mere's receipt directory.
@@ -621,4 +621,4 @@ receipts. New receipt hashes must state their Git/native byte convention.
   native Resource work:
   `murm/design_docs/2026-08-04_smolweb_over_reticulum_plan.md`;
   product receiving:
-  `turnstone/design_docs/2026-10-06_unusual_protocols_browser_plan.md`.
+  `turnstone/design_docs/archive_docs/2026-11-02/2026-10-06_unusual_protocols_browser_plan.md`.
