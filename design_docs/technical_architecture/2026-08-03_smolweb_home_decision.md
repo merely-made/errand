@@ -216,8 +216,8 @@ they resolve differently:
   crate: a bare `user@host`, an `acct:` URI, or a URL with its origin and
   port, resolved to the request URL. That keeps all of the wire in the spec
   crate and leaves gazette its endpoint classification and contact intake.
-  Unbuilt. The record and the comparison are in mere's
-  `design_docs/dramatis_docs/technical_architecture/2026-09-30_dramatis_tier_architecture.md`.
+  Unbuilt. The record and the comparison are in dramatis's
+  `repos/dramatis/design_docs/2026-09-30_dramatis_tier_architecture.md`.
 
 What makes the grouping safe is that **the cost is feature-gated, not
 crate-gated**. Every grammar is dependency-free and always compiled; every
