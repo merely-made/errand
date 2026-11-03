@@ -19,3 +19,5 @@ Canonical migration and current receipts: `mere/design_docs/archive_docs/2026-10
   state across private impl modules so moving commands cannot restart an operation budget.
   The [client splits plan](implementation_strategy/2026-11-03_client_splits_plan.md)
   records the concrete FSP/DICT boundaries and qualification scope.
+
+- [Source splits: H5 batch](implementation_strategy/2026-11-03_source_splits_plan.md): nine remaining library, server and regression-fixture exceptions under the stack-wide fifty-file target.
