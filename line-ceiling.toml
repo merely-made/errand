@@ -1,0 +1,54 @@
+# mere/design_docs/mere_docs/implementation_strategy/2026-10-30_house_style_plan.md (H2); all physical source lines count.
+ceiling = 600
+
+[[exception]]
+path = "crates/dict-protocol/src/client.rs"
+reason = "The DICT client: a session, not a fetch. Existing source-size debt; a responsibility split must preserve ClientError, Limits, Options and existing module visibility."
+
+[[exception]]
+path = "crates/errand/src/lib.rs"
+reason = "errand Async small-web (\"smolweb\") transport in one scheme-routed call. Existing source-size debt; a responsibility split must preserve FetchOptions, Scheme, Status and existing module visibility."
+
+[[exception]]
+path = "crates/errand/src/parse/feed.rs"
+reason = "Feed parser — RSS 2.0 and Atom 1.0 into a portable [Feed]. Existing source-size debt; a responsibility split must preserve Feed, FeedEnclosure, PodcastResource and existing module visibility."
+
+[[exception]]
+path = "crates/errand/tests/client_limits.rs"
+reason = "Loopback-only qualification of caller bounds across the routed protocols. Existing source-size debt; a responsibility split must preserve existing entry points, fixture identity and module visibility."
+
+[[exception]]
+path = "crates/fsp-protocol/src/client.rs"
+reason = "The FSP client: UDP, with FSP's own reliability on top. Existing source-size debt; a responsibility split must preserve Limits, Options, ClientError and existing module visibility."
+
+[[exception]]
+path = "crates/gemini-protocol/src/client.rs"
+reason = "The gemini request/response. Existing source-size debt; a responsibility split must preserve FetchOptions, ClientIdentity, Status and existing module visibility."
+
+[[exception]]
+path = "crates/gopher-protocol/src/client.rs"
+reason = "The gopher client (gopher://, port 70). Existing source-size debt; a responsibility split must preserve FetchOptions, ClientError, Response and existing module visibility."
+
+[[exception]]
+path = "crates/guppy-protocol/src/server.rs"
+reason = "The guppy server: one UDP socket, per-peer sessions, windowed transmission with retransmit-until-acked, per spec v0.4.4. Existing source-size debt; a responsibility split must preserve Request, Handler, ServerConfig and existing module visibility."
+
+[[exception]]
+path = "crates/misfin/src/client_deadline_tests.rs"
+reason = "Client deadline tests. Existing source-size debt; a responsibility split must preserve Close, Reply and existing module visibility."
+
+[[exception]]
+path = "crates/misfin/src/server.rs"
+reason = "The misfin receive server (the server feature). Existing source-size debt; a responsibility split must preserve MisfinResponse, ServedMailbox, MisfinServerConfig and existing module visibility."
+
+[[exception]]
+path = "crates/misfin/src/server_deadline_tests.rs"
+reason = "Deadline behavior for the Misfin receive path. Existing source-size debt; a responsibility split must preserve PendingShutdown and existing module visibility."
+
+[[exception]]
+path = "crates/scorpion-protocol/src/client.rs"
+reason = "An async Scorpion client. Existing source-size debt; a responsibility split must preserve ClientError, Response, Limits and existing module visibility."
+
+[[exception]]
+path = "crates/text-protocol/src/lib.rs"
+reason = "text-protocol An implementation of the Text Protocol (text://): the deliberately minimal one. Existing source-size debt; a responsibility split must preserve Status, Header, Line and existing module visibility."

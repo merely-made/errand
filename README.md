@@ -26,3 +26,10 @@ Canonical migration: `mere/design_docs/archive_docs/2026-10-28/2026-10-19_family
 Run `cargo test --workspace` for default library coverage. Optional network, GPU, external model and host acceptance have separate gates. No registry release is implied by this source promotion.
 
 The protocol crates retain their MIT licenses and stewardship offers to protocol authors. Errand retains MPL-2.0; see `crates/errand/LICENSE`. Protocol wire behavior and grammars remain independently consumable.
+
+## Local checks
+
+Enable the commit checks with `prek install --allow-missing-config`; run
+`prek run --all-files` alongside the existing local gates. Check definitions
+live in `.pre-commit-config.yaml`, with source-size exclusions and exceptions
+in `line-ceiling.toml`. Shared house style and rollout: `mere/design_docs/mere_docs/implementation_strategy/2026-10-30_house_style_plan.md`.

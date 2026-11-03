@@ -44,3 +44,6 @@ tokio = { version = "1", default-features = false, features = [
     "rt",
     "io-util",
 ] }
+
+[lints]
+workspace = true
