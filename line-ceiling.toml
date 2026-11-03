@@ -2,10 +2,6 @@
 ceiling = 600
 
 [[exception]]
-path = "crates/dict-protocol/src/client.rs"
-reason = "The DICT client: a session, not a fetch. Existing source-size debt; a responsibility split must preserve ClientError, Limits, Options and existing module visibility."
-
-[[exception]]
 path = "crates/errand/src/lib.rs"
 reason = "errand Async small-web (\"smolweb\") transport in one scheme-routed call. Existing source-size debt; a responsibility split must preserve FetchOptions, Scheme, Status and existing module visibility."
 
@@ -16,10 +12,6 @@ reason = "Feed parser — RSS 2.0 and Atom 1.0 into a portable [Feed]. Existing 
 [[exception]]
 path = "crates/errand/tests/client_limits.rs"
 reason = "Loopback-only qualification of caller bounds across the routed protocols. Existing source-size debt; a responsibility split must preserve existing entry points, fixture identity and module visibility."
-
-[[exception]]
-path = "crates/fsp-protocol/src/client.rs"
-reason = "The FSP client: UDP, with FSP's own reliability on top. Existing source-size debt; a responsibility split must preserve Limits, Options, ClientError and existing module visibility."
 
 [[exception]]
 path = "crates/gemini-protocol/src/client.rs"
