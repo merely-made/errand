@@ -12,7 +12,7 @@ repos:
         additional_dependencies: ["cli:https://github.com/merely-made/eidetic:line-ceiling-v0.0.2:line-ceiling"]
       - id: clippy
         name: clippy
-        entry: cargo clippy --locked --all-targets
+        entry: cargo clippy --locked --all-targets --all-features
         language: system
         files: '(^|/)(Cargo\.(toml|lock)|[^/]+\.rs)$'
         pass_filenames: false
