@@ -14,10 +14,6 @@ path = "crates/errand/tests/client_limits.rs"
 reason = "Loopback-only qualification of caller bounds across the routed protocols. Existing source-size debt; a responsibility split must preserve existing entry points, fixture identity and module visibility."
 
 [[exception]]
-path = "crates/gemini-protocol/src/client.rs"
-reason = "The gemini request/response. Existing source-size debt; a responsibility split must preserve FetchOptions, ClientIdentity, Status and existing module visibility."
-
-[[exception]]
 path = "crates/gopher-protocol/src/client.rs"
 reason = "The gopher client (gopher://, port 70). Existing source-size debt; a responsibility split must preserve FetchOptions, ClientError, Response and existing module visibility."
 
@@ -36,10 +32,6 @@ reason = "The misfin receive server (the server feature). Existing source-size d
 [[exception]]
 path = "crates/misfin/src/server_deadline_tests.rs"
 reason = "Deadline behavior for the Misfin receive path. Existing source-size debt; a responsibility split must preserve PendingShutdown and existing module visibility."
-
-[[exception]]
-path = "crates/scorpion-protocol/src/client.rs"
-reason = "An async Scorpion client. Existing source-size debt; a responsibility split must preserve ClientError, Response, Limits and existing module visibility."
 
 [[exception]]
 path = "crates/text-protocol/src/lib.rs"

@@ -69,3 +69,72 @@ feature isolation. Public-server and other-OS acceptance are not inferred.
 The plan is complete and the source/receipt commit is pushed directly to
 main. Compact receipt size remains below its 100 MB cap; the stable build
 cache is retained for reuse, with no isolated generated output to clean up.
+
+## 2026-11-03: Gemini connection and Scorpion reader (S4-S5)
+
+Baseline: Smolweb `31c32620c848d43df822d14423d78e79df4c79bf`, clean before
+this continuation. The same owner and 100 MB compact receipt cap apply.
+
+`cargo test -p gemini-protocol -p scorpion-protocol --all-features --locked`
+passes both before and after. The unchanged result groups are 54, 77, 10,
+1 and 1 passing cases: 143 native fixture/doctest cases in total. Gemini's
+Titan and client-certificate fixtures run in this feature set. The moved
+inline test groups retain all 13 Gemini and ten Scorpion function names
+and their original client::tests module paths. Scorpion's existing separate
+deadline fixtures keep their original path and module.
+
+`cargo test -p errand --test client_limits --locked`: all 14 receiving
+cases pass against the moved clients. Current continuation total: 157
+passing native fixture/doctest cases, without changing their assertions.
+
+| Source | Before lines | After lines |
+|---|---:|---:|
+| gemini-protocol/src/client.rs | 829 | 372 |
+| gemini-protocol/src/client/connection.rs | moved TCP/TLS setup | 190 |
+| gemini-protocol/src/client/tests.rs | moved fixtures | 283 |
+| scorpion-protocol/src/client.rs | 709 | 370 |
+| scorpion-protocol/src/client/body.rs | moved bounded response reads | 140 |
+| scorpion-protocol/src/client/tests.rs | moved fixtures | 208 |
+
+Gemini's private connection module is gated by the same tls feature; the
+eight public fetch/connect functions and Titan's crate-private connector
+are re-exported at their original client paths. Certificate selection,
+TOFU mismatch refusal, first-pin storage and request timing stay together.
+Scorpion's private reader preserves the header limits and exact, unknown,
+truncated and partial-range body behavior. Absolute deadlines and public
+exchange wrappers stay at client. No new task, state, retry or budget is
+introduced. Public data types and Cargo manifests/lock are unchanged.
+
+- `cargo check -p gemini-protocol -p scorpion-protocol
+  --no-default-features --features gemini-protocol/client,scorpion-protocol/client
+  --locked`: pass. Carrier-only clients compile with native TLS features off.
+- `cargo check -p gemini-protocol -p scorpion-protocol
+  --no-default-features --target wasm32-unknown-unknown --locked`: pass.
+  The independent grammar/wire layers retain their feature-off build.
+
+The two retired client exceptions are absent, with nine older exceptions
+left. Every resulting source file is below 600 lines. Execution is Windows
+native and controlled/loopback TLS/streams, with wasm codec compilation;
+no new public-server or other-OS qualification is inferred. Stable target
+and build paths remain C:/t/cargo-targets/smolweb with two jobs. No isolated
+build home/target/worktree or helper files are retained.
+
+### S4-S5 final gates
+
+- `prek run --all-files`: ceiling and workspace all-target/all-feature
+  Clippy pass with the new client modules staged.
+- `cargo doc -p gemini-protocol -p scorpion-protocol --all-features
+  --no-deps --locked`, with broken intra-doc links denied: pass. The existing
+  public client/connector paths and their documentation resolve.
+- Source review keeps Gemini's shared connector accessible to Titan without
+  changing pinning/certificate behavior or its visibility. Scorpion's
+  range frame boundary, capped EOF sentinel and truncated-body errors move
+  unchanged. No manifests, lockfile, hook configuration, retry/deadline
+  settings or wire types change. No replacement exemption is introduced.
+
+The source plan's S1-S5 are complete. These two exceptions retire in the
+same source/receipt commit, bringing this plan's total to four and leaving
+nine other Smolweb exceptions. The real commit repeats the installed local
+checks. All changes are pushed on main; no isolated generated output or
+source helper needs cleanup. Native execution remains scoped to Windows;
+other-platform and public-server receipts keep their original qualification.
