@@ -283,7 +283,7 @@ async fn tcp_fetch_timeout_drops_owned_connection() {
 #[cfg(feature = "tls")]
 fn tls_acceptor() -> tokio_rustls::TlsAcceptor {
     use std::sync::Arc;
-    let rcgen::CertifiedKey { cert, key_pair } =
+    let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let config = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
@@ -293,7 +293,7 @@ fn tls_acceptor() -> tokio_rustls::TlsAcceptor {
     .with_no_client_auth()
     .with_single_cert(
         vec![cert.der().clone()],
-        rustls::pki_types::PrivatePkcs8KeyDer::from(key_pair.serialize_der()).into(),
+        rustls::pki_types::PrivatePkcs8KeyDer::from(signing_key.serialize_der()).into(),
     )
     .unwrap();
     tokio_rustls::TlsAcceptor::from(Arc::new(config))

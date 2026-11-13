@@ -299,7 +299,7 @@ async fn tls_reply(
     .with_no_client_auth()
     .with_single_cert(
         vec![CertificateDer::from(cert.cert.der().to_vec())],
-        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der())),
+        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der())),
     )
     .unwrap();
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));

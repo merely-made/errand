@@ -102,7 +102,7 @@ features = [
 ]
 
 [dev-dependencies.rcgen]
-version = "0.13"
+version = "0.14"
 
 [lints]
 workspace = true

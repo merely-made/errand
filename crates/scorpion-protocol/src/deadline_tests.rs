@@ -248,7 +248,7 @@ async fn native_tls_handshake_obeys_the_caller_deadline() {
 #[tokio::test]
 async fn native_tls_and_two_framed_responses_share_one_deadline() {
     use std::sync::Arc;
-    let rcgen::CertifiedKey { cert, key_pair } =
+    let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let config = rustls::ServerConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
@@ -258,7 +258,7 @@ async fn native_tls_and_two_framed_responses_share_one_deadline() {
     .with_no_client_auth()
     .with_single_cert(
         vec![cert.der().clone()],
-        rustls::pki_types::PrivatePkcs8KeyDer::from(key_pair.serialize_der()).into(),
+        rustls::pki_types::PrivatePkcs8KeyDer::from(signing_key.serialize_der()).into(),
     )
     .unwrap();
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
