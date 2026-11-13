@@ -1,2 +1,5 @@
 /target/
 /.cargo/config.local.toml
+# No Cargo.lock is tracked (engine split D139); what cargo resolved rides on each
+# commit as a git note: `house resolved show <commit>`.
+Cargo.lock

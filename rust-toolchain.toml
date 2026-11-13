@@ -4,7 +4,7 @@
 # bare minimum on purpose: there is no reason to hold a release behind the floor.
 # The wasm32-wasip2 target is for the document-core guest crates (built per-crate).
 [toolchain]
-channel = "1.99.1"
+channel = "stable"
 # wasm32-unknown-unknown carries the browser half of the WebRTC carrier
 # (Murm native/crates/webrtc-carrier); its C0 receipt is a dual-target build, which
 # only reproduces on a fresh clone if the target is declared here.
