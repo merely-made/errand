@@ -174,7 +174,10 @@ mod tests {
     #[test]
     fn rel_filters_append_in_order() {
         let url = request_url("example.com", "acct:a@b", &["self", "http://x/y"]);
-        assert!(url.ends_with("&rel=self&rel=http%3A%2F%2Fx%2Fy"), "got {url}");
+        assert!(
+            url.ends_with("&rel=self&rel=http%3A%2F%2Fx%2Fy"),
+            "got {url}"
+        );
     }
 
     #[test]
@@ -189,8 +192,14 @@ mod tests {
     fn a_link_is_found_by_relation_with_its_media_type() {
         let jrd = parse(CAROL).unwrap();
         let this = jrd.link("self").unwrap();
-        assert_eq!(this.media_type.as_deref(), Some("application/activity+json"));
-        assert_eq!(this.href.as_deref(), Some("https://example.com/users/carol"));
+        assert_eq!(
+            this.media_type.as_deref(),
+            Some("application/activity+json")
+        );
+        assert_eq!(
+            this.href.as_deref(),
+            Some("https://example.com/users/carol")
+        );
         assert_eq!(this.titles.get("en-us").map(String::as_str), Some("Carol"));
     }
 

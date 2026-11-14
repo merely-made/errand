@@ -176,7 +176,7 @@ impl Parameter {
         Ok(match subprotocol {
             Subprotocol::Receive => {
                 Self::Range(Range::parse(text).ok_or(RequestError::MalformedRange)?)
-            },
+            }
             Subprotocol::Send => match text.split_once('@') {
                 Some((hmac, version)) => Self::Hmac {
                     hmac: hmac.to_string(),
@@ -333,7 +333,7 @@ fn has_scheme(url: &str) -> bool {
     let scheme = &url[..colon];
     let mut chars = scheme.chars();
     match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() => {},
+        Some(first) if first.is_ascii_alphabetic() => {}
         _ => return false,
     }
     chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
@@ -460,6 +460,9 @@ mod tests {
         // CSI-shaped by design so a terminal emulator can reuse its parser.
         let parsed = Request::parse("IL1x80;24 scorpion://example.com/shell").unwrap();
         assert_eq!(parsed.parameter, Parameter::Capabilities("L1x80;24".into()));
-        assert_eq!(parsed.to_wire(), b"IL1x80;24 scorpion://example.com/shell\r\n");
+        assert_eq!(
+            parsed.to_wire(),
+            b"IL1x80;24 scorpion://example.com/shell\r\n"
+        );
     }
 }

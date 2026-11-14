@@ -96,7 +96,9 @@ pub fn is_terminator(line: &str) -> bool {
 /// So a received `..text` is really `.text`, and a client that forgets this
 /// corrupts any definition beginning with a period.
 pub fn unstuff(line: &str) -> &str {
-    line.strip_prefix('.').filter(|_| line.starts_with("..")).unwrap_or(line)
+    line.strip_prefix('.')
+        .filter(|_| line.starts_with(".."))
+        .unwrap_or(line)
 }
 
 /// Apply dot-stuffing, which is what a server does when writing a text block.
@@ -130,13 +132,13 @@ pub fn split_params(text: &str) -> Vec<String> {
             '"' => {
                 in_quotes = !in_quotes;
                 started = true;
-            },
+            }
             c if c.is_whitespace() && !in_quotes => {
                 if started || !current.is_empty() {
                     params.push(std::mem::take(&mut current));
                     started = false;
                 }
-            },
+            }
             c => current.push(c),
         }
     }
@@ -227,9 +229,17 @@ mod tests {
 
     #[test]
     fn the_classes_are_told_apart() {
-        assert!(parse_status("110 3 databases present").unwrap().has_text_block());
+        assert!(
+            parse_status("110 3 databases present")
+                .unwrap()
+                .has_text_block()
+        );
         assert!(parse_status("220 dictd 1.12").unwrap().is_success());
-        assert!(parse_status("420 unavailable").unwrap().is_temporary_failure());
+        assert!(
+            parse_status("420 unavailable")
+                .unwrap()
+                .is_temporary_failure()
+        );
         assert!(parse_status("552 no match").unwrap().is_permanent_failure());
     }
 
@@ -303,7 +313,10 @@ mod tests {
 
     #[test]
     fn a_match_list_parses() {
-        let lines = vec![r#"wn "dictionary""#.to_string(), r#"foldoc "dict""#.to_string()];
+        let lines = vec![
+            r#"wn "dictionary""#.to_string(),
+            r#"foldoc "dict""#.to_string(),
+        ];
         assert_eq!(
             parse_matches(&lines),
             vec![

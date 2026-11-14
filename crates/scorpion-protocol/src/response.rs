@@ -275,7 +275,9 @@ impl Header {
             return None;
         }
         Some((
-            self.parameters.first().and_then(|t| CertificateScope::parse(t)),
+            self.parameters
+                .first()
+                .and_then(|t| CertificateScope::parse(t)),
             self.parameters.get(1).map(String::as_str),
         ))
     }

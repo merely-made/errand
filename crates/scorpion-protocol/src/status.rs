@@ -235,7 +235,7 @@ pub(crate) fn split_parameters(status: Status, rest: &str) -> Vec<&str> {
             Some((head, tail)) => {
                 parts.push(head);
                 remainder = tail;
-            },
+            }
             None => break,
         }
     }

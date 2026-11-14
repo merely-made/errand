@@ -296,7 +296,11 @@ pub enum AskDirective {
 /// }
 /// ```
 pub fn parse_ask(block: &AttributeBlock) -> Vec<AskDirective> {
-    block.lines.iter().map(|line| parse_ask_line(line)).collect()
+    block
+        .lines
+        .iter()
+        .map(|line| parse_ask_line(line))
+        .collect()
 }
 
 fn parse_ask_line(line: &str) -> AskDirective {

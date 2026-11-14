@@ -227,7 +227,11 @@ async fn late_always_ready_completion_is_not_a_success() {
         exchange_with_options(IRI, &mut client, &policy).await,
         Err(ClientError::TimedOut)
     ));
-    assert_eq!(client.cursor, client.bytes.len(), "fixture reached late completion");
+    assert_eq!(
+        client.cursor,
+        client.bytes.len(),
+        "fixture reached late completion"
+    );
 }
 #[tokio::test]
 async fn tcp_fetch_timeout_drops_owned_connection() {

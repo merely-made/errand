@@ -24,7 +24,9 @@ fn test_acceptor() -> TlsAcceptor {
     let certified = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     acceptor(
         vec![certified.cert.der().clone()],
-        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der())),
+        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+            certified.signing_key.serialize_der(),
+        )),
     )
     .unwrap()
 }

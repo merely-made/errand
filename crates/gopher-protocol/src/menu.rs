@@ -156,7 +156,7 @@ fn parse_line(line: &str) -> Option<GopherItem> {
                 url: Some(url.to_string()),
                 plus,
             })
-        },
+        }
         _ => {
             if host.is_empty() {
                 return None;
@@ -169,7 +169,7 @@ fn parse_line(line: &str) -> Option<GopherItem> {
                 url: Some(url),
                 plus,
             })
-        },
+        }
     }
 }
 
@@ -287,7 +287,10 @@ mod tests {
             line('8', "telnet", "", "example.test", "23"),
             line('T', "tn3270", "", "example.test", "23"),
         ));
-        let got: Vec<_> = items.iter().map(|item| (item.kind.clone(), item.raw_type)).collect();
+        let got: Vec<_> = items
+            .iter()
+            .map(|item| (item.kind.clone(), item.raw_type))
+            .collect();
         assert_eq!(
             got,
             [(GopherKind::Telnet, '8'), (GopherKind::Telnet, 'T')],
@@ -305,8 +308,14 @@ mod tests {
         ));
         assert_eq!(items[0].kind, GopherKind::Cso);
         assert_eq!(items[0].url.as_deref(), Some("gopher://example.test:105/2"));
-        assert_eq!((items[1].kind.clone(), items[1].raw_type), (GopherKind::Image, 'g'));
-        assert_eq!((items[2].kind.clone(), items[2].raw_type), (GopherKind::Other('5'), '5'));
+        assert_eq!(
+            (items[1].kind.clone(), items[1].raw_type),
+            (GopherKind::Image, 'g')
+        );
+        assert_eq!(
+            (items[2].kind.clone(), items[2].raw_type),
+            (GopherKind::Other('5'), '5')
+        );
     }
 
     #[test]

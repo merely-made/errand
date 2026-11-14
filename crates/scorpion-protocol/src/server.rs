@@ -86,7 +86,10 @@ impl Reply {
                 media_type,
                 version,
             } => {
-                let mut parameters = vec![Size::Known(body.len() as u64).to_string(), media_type.clone()];
+                let mut parameters = vec![
+                    Size::Known(body.len() as u64).to_string(),
+                    media_type.clone(),
+                ];
                 if let Some(version) = version {
                     parameters.push(version.clone());
                 }
@@ -97,7 +100,7 @@ impl Reply {
                     },
                     body,
                 )
-            },
+            }
             Self::Partial {
                 body,
                 total,
@@ -152,11 +155,7 @@ impl Reply {
 /// incomplete.
 pub trait Source: Send + Sync {
     /// Answer an `R` request, optionally for one byte range.
-    fn receive(
-        &self,
-        url: &str,
-        range: Option<Range>,
-    ) -> impl Future<Output = Reply> + Send;
+    fn receive(&self, url: &str, range: Option<Range>) -> impl Future<Output = Reply> + Send;
 
     /// Answer an `M` request: information *about* the file.
     ///
@@ -206,22 +205,22 @@ where
             )
             .await?;
             return Ok(None);
-        },
+        }
     };
 
     let reply = match (&request.subprotocol, &request.parameter) {
         (Subprotocol::Receive, Parameter::Range(range)) => {
             source.receive(&request.url, Some(*range)).await
-        },
+        }
         (Subprotocol::Receive, _) => source.receive(&request.url, None).await,
         (Subprotocol::Meta, Parameter::DesiredType(kind)) => {
             source.meta(&request.url, Some(kind)).await
-        },
+        }
         (Subprotocol::Meta, _) => source.meta(&request.url, None).await,
         (Subprotocol::Send, parameter) => source.send(&request.url, parameter).await,
         (Subprotocol::Interactive, Parameter::Capabilities(codes)) => {
             source.interactive(&request.url, codes).await
-        },
+        }
         (Subprotocol::Interactive, _) => source.interactive(&request.url, "").await,
     };
 
@@ -289,7 +288,9 @@ where
             break;
         }
         if line.len() >= max {
-            return Err(io::Error::other("request line exceeds the permitted length"));
+            return Err(io::Error::other(
+                "request line exceeds the permitted length",
+            ));
         }
         line.push(byte[0]);
     }
@@ -400,7 +401,10 @@ mod tests {
             drop(server_side);
         });
         // No scheme, which the spec makes mandatory.
-        client_side.write_all(b"R /relative/path\r\n").await.unwrap();
+        client_side
+            .write_all(b"R /relative/path\r\n")
+            .await
+            .unwrap();
         client_side.flush().await.unwrap();
 
         let response = crate::client::read_response(&mut client_side, Limits::default(), None)

@@ -308,11 +308,7 @@ async fn handle_connection(
         }
         line.push(byte[0]);
         if line.len() > config.max_request_line {
-            return write_reply(
-                &mut tls,
-                &Reply::header(59, "request exceeds 1024 bytes"),
-            )
-            .await;
+            return write_reply(&mut tls, &Reply::header(59, "request exceeds 1024 bytes")).await;
         }
     }
 
@@ -405,10 +401,7 @@ mod tests {
 
     #[test]
     fn the_header_line_is_the_spec_shape() {
-        assert_eq!(
-            Reply::gemtext("body").header_line(),
-            "20 text/gemini\r\n"
-        );
+        assert_eq!(Reply::gemtext("body").header_line(), "20 text/gemini\r\n");
         assert_eq!(
             Reply::not_found("no such page").header_line(),
             "51 no such page\r\n"

@@ -242,7 +242,9 @@ pub fn parse_request(line: &[u8]) -> (String, Option<String>, Option<PlusRequest
 
     let mut fields = text.split('\t');
     let selector = fields.next().unwrap_or("").to_string();
-    let search = fields.next().and_then(|s| (!s.is_empty()).then(|| s.to_string()));
+    let search = fields
+        .next()
+        .and_then(|s| (!s.is_empty()).then(|| s.to_string()));
     let plus = fields.next().and_then(PlusRequest::from_token);
     (selector, search, plus)
 }

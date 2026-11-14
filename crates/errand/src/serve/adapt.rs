@@ -87,7 +87,7 @@ pub fn gopher<S: Source>(
                 // menu carrying an item that says what happened.
                 Some(Item::NeedsInput { prompt }) => {
                     to_gophermap(&note(&prompt), &host, port).into_bytes()
-                },
+                }
                 Some(Item::Redirect { target }) => {
                     let mut listing = note("This has moved.");
                     listing.entries.push(super::Entry::new(
@@ -96,7 +96,7 @@ pub fn gopher<S: Source>(
                         super::EntryKind::Directory,
                     ));
                     to_gophermap(&listing, &host, port).into_bytes()
-                },
+                }
                 None => error_menu("not found", &host, port),
             }
         }
@@ -130,7 +130,7 @@ pub fn finger<S: Source>(source: Arc<S>) -> impl finger_protocol::server::Handle
                 Some(Item::NeedsInput { prompt }) => format!("{prompt}\n").into_bytes(),
                 Some(Item::Redirect { target }) => {
                     format!("This has moved to {target}\n").into_bytes()
-                },
+                }
                 None => b"No such user.\n".to_vec(),
             }
         }

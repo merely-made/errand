@@ -41,11 +41,17 @@ fn a_declared_body_larger_than_the_input_allocates_nothing() {
     // This must be refused by comparing declared against available, not by
     // allocating 16MB and discovering the shortfall.
     let bytes = [0x00u8, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x41];
-    assert_eq!(document::parse(&bytes), Err(document::DocumentError::Truncated));
+    assert_eq!(
+        document::parse(&bytes),
+        Err(document::DocumentError::Truncated)
+    );
 
     // Likewise a 65535-byte attribute inside four bytes.
     let bytes = [0x00u8, 0xFF, 0xFF, 0x41];
-    assert_eq!(document::parse(&bytes), Err(document::DocumentError::Truncated));
+    assert_eq!(
+        document::parse(&bytes),
+        Err(document::DocumentError::Truncated)
+    );
 }
 
 #[test]
@@ -96,13 +102,30 @@ fn arbitrary_text_never_panics_the_request_parser() {
     // character is the classic slicing hazard here, because the subprotocol
     // byte is read as a char and the remainder sliced after it.
     let cases = [
-        "", " ", "R", "R ", "R  ", "\r\n", "\n", "R\r\n", " \r\n",
-        "\u{e9} scorpion://x/", "\u{1F600} scorpion://x/", "R\u{1F600} scorpion://x/",
-        "R\u{0}scorpion://x/", "R scorpion://\u{1F600}/",
-        "S@ scorpion://x/", "S@@@ scorpion://x/", "R- scorpion://x/",
-        "R-1- scorpion://x/", "R99999999999999999999- scorpion://x/",
-        "M\u{e9} scorpion://x/", "I\u{7f} scorpion://x/",
-        ":// scorpion://x/", "R :", "R ::::",
+        "",
+        " ",
+        "R",
+        "R ",
+        "R  ",
+        "\r\n",
+        "\n",
+        "R\r\n",
+        " \r\n",
+        "\u{e9} scorpion://x/",
+        "\u{1F600} scorpion://x/",
+        "R\u{1F600} scorpion://x/",
+        "R\u{0}scorpion://x/",
+        "R scorpion://\u{1F600}/",
+        "S@ scorpion://x/",
+        "S@@@ scorpion://x/",
+        "R- scorpion://x/",
+        "R-1- scorpion://x/",
+        "R99999999999999999999- scorpion://x/",
+        "M\u{e9} scorpion://x/",
+        "I\u{7f} scorpion://x/",
+        ":// scorpion://x/",
+        "R :",
+        "R ::::",
     ];
     for case in cases {
         let _ = Request::parse(case);
@@ -123,10 +146,29 @@ fn arbitrary_text_never_panics_the_response_parser() {
     // what makes byte offset 2 a safe char boundary. If that check were ever
     // relaxed, `line.get(2..)` would start returning None on multi-byte input.
     let cases = [
-        "", "2", "20", "20 ", "2\u{e9}", "\u{1F600}0 x", "20\u{1F600}",
-        "90 nine is not a class", "99", "0", "  ", "20  ", "\r\n", "20\r\n",
-        "20 ? ", "20 ?", "44 99999999999999999999 msg", "60", "60 ", "60 =",
-        "60 \u{1F600}/path text", "81", "82 ",
+        "",
+        "2",
+        "20",
+        "20 ",
+        "2\u{e9}",
+        "\u{1F600}0 x",
+        "20\u{1F600}",
+        "90 nine is not a class",
+        "99",
+        "0",
+        "  ",
+        "20  ",
+        "\r\n",
+        "20\r\n",
+        "20 ? ",
+        "20 ?",
+        "44 99999999999999999999 msg",
+        "60",
+        "60 ",
+        "60 =",
+        "60 \u{1F600}/path text",
+        "81",
+        "82 ",
     ];
     for case in cases {
         let _ = Header::parse(case);

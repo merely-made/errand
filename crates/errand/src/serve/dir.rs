@@ -65,9 +65,9 @@ impl Directory {
                     if !safe.pop() {
                         return None;
                     }
-                },
+                }
                 // Leading `/`, `.`, and Windows prefixes carry no meaning here.
-                Component::RootDir | Component::CurDir => {},
+                Component::RootDir | Component::CurDir => {}
                 Component::Prefix(_) => return None,
             }
         }
