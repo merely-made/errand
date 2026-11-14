@@ -35,6 +35,7 @@
 use std::sync::Arc;
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::WebPkiSupportedAlgorithms;
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use tokio::net::TcpStream;
@@ -47,8 +48,7 @@ use crate::client::{
 /// A `rustls` client config with the specification's transport requirements
 /// applied, and `verifier` deciding trust.
 pub fn base_config(verifier: Arc<dyn ServerCertVerifier>) -> rustls::ClientConfig {
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut config = rustls::ClientConfig::builder_with_provider(provider)
+    let mut config = rustls::ClientConfig::builder_with_provider(provider())
         .with_safe_default_protocol_versions()
         .expect("ring provides the default protocol versions")
         .dangerous()
@@ -93,14 +93,23 @@ pub async fn connect_with_deadline(
     .await
 }
 
+/// The crypto provider [`base_config`] builds with.
+fn provider() -> Arc<rustls::crypto::CryptoProvider> {
+    Arc::new(rustls::crypto::ring::default_provider())
+}
+
 /// A verifier that accepts any server certificate.
 ///
 /// For callers that inspect the peer certificate themselves after the
-/// handshake and decide there. It performs **no** validation of any kind, so
-/// reaching for it without doing that check leaves the connection open to an
-/// active attacker.
+/// handshake and decide there. It performs **no** validation of the
+/// certificate itself, so reaching for it without doing that check leaves the
+/// connection open to an active attacker. It does check, through rustls, that
+/// the server signed the handshake with the presented certificate's key, so a
+/// certificate inspected after the handshake belongs to the peer.
 pub fn accept_any_verifier() -> Arc<dyn ServerCertVerifier> {
-    Arc::new(AcceptAny)
+    Arc::new(AcceptAny {
+        algorithms: provider().signature_verification_algorithms,
+    })
 }
 
 /// Whether a negotiated connection would expose a client certificate.
@@ -117,20 +126,9 @@ pub fn warn_on_client_cert(connection: &rustls::ClientConnection) -> bool {
 
 /// Accepts anything. See [`accept_any_verifier`].
 #[derive(Debug)]
-struct AcceptAny;
-
-const ACCEPTED_SCHEMES: [SignatureScheme; 10] = [
-    SignatureScheme::RSA_PKCS1_SHA256,
-    SignatureScheme::RSA_PKCS1_SHA384,
-    SignatureScheme::RSA_PKCS1_SHA512,
-    SignatureScheme::ECDSA_NISTP256_SHA256,
-    SignatureScheme::ECDSA_NISTP384_SHA384,
-    SignatureScheme::ECDSA_NISTP521_SHA512,
-    SignatureScheme::RSA_PSS_SHA256,
-    SignatureScheme::RSA_PSS_SHA384,
-    SignatureScheme::RSA_PSS_SHA512,
-    SignatureScheme::ED25519,
-];
+struct AcceptAny {
+    algorithms: WebPkiSupportedAlgorithms,
+}
 
 impl ServerCertVerifier for AcceptAny {
     fn verify_server_cert(
@@ -146,24 +144,24 @@ impl ServerCertVerifier for AcceptAny {
 
     fn verify_tls12_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
     }
 
     fn verify_tls13_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        ACCEPTED_SCHEMES.to_vec()
+        self.algorithms.supported_schemes()
     }
 }
 
@@ -199,3 +197,7 @@ mod tests {
         assert!(matches!(error, ClientError::Url(_)));
     }
 }
+
+#[cfg(test)]
+#[path = "tls_signature_tests.rs"]
+mod signature_tests;

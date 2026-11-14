@@ -227,6 +227,7 @@ mod tls {
     use std::sync::Arc;
 
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+    use rustls::crypto::WebPkiSupportedAlgorithms;
     use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
     use rustls::{DigitallySignedStruct, SignatureScheme};
     use tokio::net::TcpStream;
@@ -241,11 +242,12 @@ mod tls {
     ) -> Result<tokio_rustls::client::TlsStream<TcpStream>, ClientError> {
         super::client::check_deadline(deadline)?;
         let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let algorithms = provider.signature_verification_algorithms;
         let config = rustls::ClientConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()
             .map_err(|e| ClientError::Connect(e.to_string()))?
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(AcceptAny))
+            .with_custom_certificate_verifier(Arc::new(AcceptAny { algorithms }))
             .with_no_client_auth();
         super::client::check_deadline(deadline)?;
         let tcp = TcpStream::connect((host, port))
@@ -260,8 +262,12 @@ mod tls {
             .map_err(|e| ClientError::Connect(format!("tls handshake: {e}")))
     }
 
+    /// Accepts any certificate; the handshake signature is still checked
+    /// against the presented certificate's key, by rustls.
     #[derive(Debug)]
-    struct AcceptAny;
+    struct AcceptAny {
+        algorithms: WebPkiSupportedAlgorithms,
+    }
 
     impl ServerCertVerifier for AcceptAny {
         fn verify_server_cert(
@@ -277,35 +283,24 @@ mod tls {
 
         fn verify_tls12_signature(
             &self,
-            _message: &[u8],
-            _cert: &CertificateDer<'_>,
-            _dss: &DigitallySignedStruct,
+            message: &[u8],
+            cert: &CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
         ) -> Result<HandshakeSignatureValid, rustls::Error> {
-            Ok(HandshakeSignatureValid::assertion())
+            rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
         }
 
         fn verify_tls13_signature(
             &self,
-            _message: &[u8],
-            _cert: &CertificateDer<'_>,
-            _dss: &DigitallySignedStruct,
+            message: &[u8],
+            cert: &CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
         ) -> Result<HandshakeSignatureValid, rustls::Error> {
-            Ok(HandshakeSignatureValid::assertion())
+            rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
         }
 
         fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-            vec![
-                SignatureScheme::RSA_PKCS1_SHA256,
-                SignatureScheme::RSA_PKCS1_SHA384,
-                SignatureScheme::RSA_PKCS1_SHA512,
-                SignatureScheme::ECDSA_NISTP256_SHA256,
-                SignatureScheme::ECDSA_NISTP384_SHA384,
-                SignatureScheme::ECDSA_NISTP521_SHA512,
-                SignatureScheme::RSA_PSS_SHA256,
-                SignatureScheme::RSA_PSS_SHA384,
-                SignatureScheme::RSA_PSS_SHA512,
-                SignatureScheme::ED25519,
-            ]
+            self.algorithms.supported_schemes()
         }
     }
 }
@@ -432,3 +427,6 @@ mod limits_tests;
 
 #[cfg(all(test, feature = "client"))]
 mod deadline_tests;
+
+#[cfg(all(test, feature = "tls"))]
+mod tls_signature_tests;

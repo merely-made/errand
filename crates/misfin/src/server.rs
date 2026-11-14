@@ -381,10 +381,12 @@ impl MisfinServer {
             .map_err(|error| MisfinServerError::Config(error.to_string()))?;
         let cert = CertificateDer::from(config.tls_certificate_der);
         let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(config.tls_private_key_pkcs8_der));
-        let tls_config = rustls::ServerConfig::builder_with_provider(crate::client::tls_provider())
+        let provider = crate::client::tls_provider();
+        let algorithms = provider.signature_verification_algorithms;
+        let tls_config = rustls::ServerConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()
             .map_err(|error| MisfinServerError::Config(error.to_string()))?
-            .with_client_cert_verifier(Arc::new(AcceptAnyClient))
+            .with_client_cert_verifier(Arc::new(AcceptAnyClient { algorithms }))
             .with_single_cert(vec![cert], key)
             .map_err(|error| MisfinServerError::Config(error.to_string()))?;
         Ok(Self {
@@ -532,6 +534,10 @@ mod server_lifecycle_tests;
 #[cfg(test)]
 #[path = "server_deadline_tests.rs"]
 mod server_deadline_tests;
+
+#[cfg(test)]
+#[path = "server_signature_tests.rs"]
+mod server_signature_tests;
 
 #[cfg(test)]
 mod tests;

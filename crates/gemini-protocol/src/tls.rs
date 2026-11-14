@@ -16,6 +16,7 @@
 use std::sync::{Arc, Mutex};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::WebPkiSupportedAlgorithms;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio_rustls::TlsConnector;
@@ -40,6 +41,7 @@ pub(crate) fn pinning_connector(
 ) -> Result<(TlsConnector, SeenCell), String> {
     let seen: SeenCell = Arc::new(Mutex::new(None));
     let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let algorithms = provider.signature_verification_algorithms;
     let builder = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .map_err(|error| format!("TLS protocol versions: {error}"))?
@@ -47,6 +49,7 @@ pub(crate) fn pinning_connector(
         .with_custom_certificate_verifier(Arc::new(PinningVerifier {
             pinned,
             seen: Arc::clone(&seen),
+            algorithms,
         }));
     let config = match identity {
         Some(identity) => builder
@@ -62,26 +65,16 @@ pub(crate) fn pinning_connector(
     Ok((TlsConnector::from(Arc::new(config)), seen))
 }
 
-const ACCEPTED_SCHEMES: [SignatureScheme; 10] = [
-    SignatureScheme::RSA_PKCS1_SHA256,
-    SignatureScheme::RSA_PKCS1_SHA384,
-    SignatureScheme::RSA_PKCS1_SHA512,
-    SignatureScheme::ECDSA_NISTP256_SHA256,
-    SignatureScheme::ECDSA_NISTP384_SHA384,
-    SignatureScheme::ECDSA_NISTP521_SHA512,
-    SignatureScheme::RSA_PSS_SHA256,
-    SignatureScheme::RSA_PSS_SHA384,
-    SignatureScheme::RSA_PSS_SHA512,
-    SignatureScheme::ED25519,
-];
-
 /// Pins the leaf against `pinned`: records what it saw, accepts a first
 /// contact or matching pin, rejects a changed certificate. CA-chain
-/// validation is intentionally skipped — gemini has no CA system.
+/// validation is intentionally skipped — gemini has no CA system. The
+/// handshake signature is still checked, by rustls with the connection's
+/// provider, so a replayed certificate does not pass without its key.
 #[derive(Debug)]
 struct PinningVerifier {
     pinned: Option<[u8; 32]>,
     seen: SeenCell,
+    algorithms: WebPkiSupportedAlgorithms,
 }
 
 impl ServerCertVerifier for PinningVerifier {
@@ -106,30 +99,34 @@ impl ServerCertVerifier for PinningVerifier {
 
     fn verify_tls12_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
     }
 
     fn verify_tls13_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        ACCEPTED_SCHEMES.to_vec()
+        self.algorithms.supported_schemes()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn algorithms() -> WebPkiSupportedAlgorithms {
+        rustls::crypto::ring::default_provider().signature_verification_algorithms
+    }
 
     fn verify(verifier: &PinningVerifier, cert: &[u8]) -> Result<(), rustls::Error> {
         let der = CertificateDer::from(cert.to_vec());
@@ -145,6 +142,7 @@ mod tests {
         let verifier = PinningVerifier {
             pinned: None,
             seen: Arc::clone(&seen),
+            algorithms: algorithms(),
         };
         assert!(verify(&verifier, b"leaf").is_ok());
         assert_eq!(*seen.lock().unwrap(), Some(tofu::fingerprint(b"leaf")));
@@ -155,6 +153,7 @@ mod tests {
         let verifier = PinningVerifier {
             pinned: Some(tofu::fingerprint(b"leaf")),
             seen: Arc::new(Mutex::new(None)),
+            algorithms: algorithms(),
         };
         assert!(verify(&verifier, b"leaf").is_ok());
     }
@@ -165,8 +164,13 @@ mod tests {
         let verifier = PinningVerifier {
             pinned: Some(tofu::fingerprint(b"old")),
             seen: Arc::clone(&seen),
+            algorithms: algorithms(),
         };
         assert!(verify(&verifier, b"new").is_err());
         assert_eq!(*seen.lock().unwrap(), Some(tofu::fingerprint(b"new")));
     }
 }
+
+#[cfg(test)]
+#[path = "tls_signature_tests.rs"]
+mod signature_tests;

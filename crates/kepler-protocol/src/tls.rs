@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::WebPkiSupportedAlgorithms;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio::net::TcpStream;
@@ -26,11 +27,12 @@ pub(crate) async fn exchange_tls(
 ) -> Result<Response, ClientError> {
     crate::client::check_deadline(deadline)?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let algorithms = provider.signature_verification_algorithms;
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .map_err(|e| ClientError::Connect(e.to_string()))?
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AcceptAny))
+        .with_custom_certificate_verifier(Arc::new(AcceptAny { algorithms }))
         .with_no_client_auth();
 
     crate::client::check_deadline(deadline)?;
@@ -50,8 +52,13 @@ pub(crate) async fn exchange_tls(
 
 /// Accepts any certificate. See the module note: this is confidentiality
 /// without authentication, and the crate says so rather than implying more.
+///
+/// The handshake signature is still checked against the presented
+/// certificate's key, by rustls, so the peer proves it holds that key.
 #[derive(Debug)]
-struct AcceptAny;
+struct AcceptAny {
+    algorithms: WebPkiSupportedAlgorithms,
+}
 
 impl ServerCertVerifier for AcceptAny {
     fn verify_server_cert(
@@ -67,34 +74,27 @@ impl ServerCertVerifier for AcceptAny {
 
     fn verify_tls12_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
     }
 
     fn verify_tls13_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        vec![
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA384,
-            SignatureScheme::RSA_PKCS1_SHA512,
-            SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::ECDSA_NISTP384_SHA384,
-            SignatureScheme::ECDSA_NISTP521_SHA512,
-            SignatureScheme::RSA_PSS_SHA256,
-            SignatureScheme::RSA_PSS_SHA384,
-            SignatureScheme::RSA_PSS_SHA512,
-            SignatureScheme::ED25519,
-        ]
+        self.algorithms.supported_schemes()
     }
 }
+
+#[cfg(test)]
+#[path = "tls_signature_tests.rs"]
+mod signature_tests;

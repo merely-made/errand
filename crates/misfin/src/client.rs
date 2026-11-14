@@ -16,6 +16,7 @@ use tokio::time::Instant;
 use rustls::DigitallySignedStruct;
 use rustls::SignatureScheme;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::WebPkiSupportedAlgorithms;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -272,11 +273,13 @@ pub async fn send(
     let send_timeout = options.send_timeout.unwrap_or(DEFAULT_SEND_TIMEOUT);
     validate_timeouts(timeout, send_timeout)?;
 
-    let builder = rustls::ClientConfig::builder_with_provider(tls_provider())
+    let provider = tls_provider();
+    let algorithms = provider.signature_verification_algorithms;
+    let builder = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
         .map_err(|error| SendError::Tls(error.to_string()))?
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AcceptAnySelfSigned));
+        .with_custom_certificate_verifier(Arc::new(AcceptAnySelfSigned { algorithms }));
     let config = match &options.identity {
         Some(identity) => {
             let mut chain = vec![CertificateDer::from(identity.certificate_der.clone())];
@@ -449,11 +452,19 @@ where
 #[path = "client_deadline_tests.rs"]
 mod client_deadline_tests;
 
+#[cfg(test)]
+#[path = "client_signature_tests.rs"]
+mod client_signature_tests;
+
 /// Misfin peers are self-signed, so certificate-chain validation is
 /// meaningless; trust is by fingerprint (TOFU / pinning), decided above the
-/// TLS layer. Never use this verifier for CA-anchored TLS.
+/// TLS layer. Never use this verifier for CA-anchored TLS. The handshake
+/// signature is still checked by rustls, so a fingerprint pin is only passed by
+/// a server holding the pinned certificate's key.
 #[derive(Debug)]
-struct AcceptAnySelfSigned;
+struct AcceptAnySelfSigned {
+    algorithms: WebPkiSupportedAlgorithms,
+}
 
 impl ServerCertVerifier for AcceptAnySelfSigned {
     fn verify_server_cert(
@@ -469,33 +480,24 @@ impl ServerCertVerifier for AcceptAnySelfSigned {
 
     fn verify_tls12_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
     }
 
     fn verify_tls13_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        vec![
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA384,
-            SignatureScheme::RSA_PKCS1_SHA512,
-            SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::ECDSA_NISTP384_SHA384,
-            SignatureScheme::RSA_PSS_SHA256,
-            SignatureScheme::RSA_PSS_SHA384,
-            SignatureScheme::ED25519,
-        ]
+        self.algorithms.supported_schemes()
     }
 }
 

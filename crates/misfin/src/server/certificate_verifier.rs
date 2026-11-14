@@ -1,4 +1,5 @@
 use rustls::client::danger::HandshakeSignatureValid;
+use rustls::crypto::WebPkiSupportedAlgorithms;
 use rustls::pki_types::{CertificateDer, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, DistinguishedName, SignatureScheme};
@@ -7,9 +8,13 @@ use rustls::{DigitallySignedStruct, DistinguishedName, SignatureScheme};
 /// client presents (TOFU-permissive) and does not *require* one — a client with
 /// no certificate still completes the handshake, so the server can reply 60 at
 /// the application layer rather than failing the handshake. Never use for
-/// CA-anchored TLS.
+/// CA-anchored TLS. A presented certificate's handshake signature is still
+/// checked by rustls, so a sender fingerprint is only claimed by a client
+/// holding that certificate's key.
 #[derive(Debug)]
-pub(super) struct AcceptAnyClient;
+pub(super) struct AcceptAnyClient {
+    pub(super) algorithms: WebPkiSupportedAlgorithms,
+}
 
 impl ClientCertVerifier for AcceptAnyClient {
     fn offer_client_auth(&self) -> bool {
@@ -35,32 +40,23 @@ impl ClientCertVerifier for AcceptAnyClient {
 
     fn verify_tls12_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
     }
 
     fn verify_tls13_signature(
         &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        vec![
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA384,
-            SignatureScheme::RSA_PKCS1_SHA512,
-            SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::ECDSA_NISTP384_SHA384,
-            SignatureScheme::RSA_PSS_SHA256,
-            SignatureScheme::RSA_PSS_SHA384,
-            SignatureScheme::ED25519,
-        ]
+        self.algorithms.supported_schemes()
     }
 }
