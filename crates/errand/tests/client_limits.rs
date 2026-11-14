@@ -4,6 +4,12 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, UdpSocket};
 
+/// These tests measure limits and deadlines, not trust: the TLS schemes run
+/// against accept-any, installed by name (no store is installed by default).
+fn accept_any_trust() {
+    errand::set_trust_store(std::sync::Arc::new(errand::PermissiveTofu));
+}
+
 async fn tcp_reply(
     scheme: &str,
     reply: Vec<u8>,
@@ -92,6 +98,7 @@ async fn spartan_response_header_is_separate_from_body_budget() {
 
 #[tokio::test]
 async fn routed_deadlines_expire_while_peer_keeps_connection_open() {
+    accept_any_trust();
     for scheme in [
         "gopher", "finger", "nex", "spartan", "gemini", "scroll", "titan",
     ] {
@@ -243,6 +250,7 @@ async fn explicit_writes_count_payload_and_line_before_network() {
 
 #[tokio::test]
 async fn legacy_explicit_write_wrappers_allow_caller_owned_payloads_over_read_request_default() {
+    accept_any_trust();
     let body = vec![b'x'; 8192];
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = Url::parse(&format!(
@@ -326,6 +334,7 @@ async fn tls_reply(
 
 #[tokio::test]
 async fn routed_tls_facade_forwards_body_and_header_policy() {
+    accept_any_trust();
     let options = FetchOptions {
         max_body_bytes: 4,
         max_header_line_bytes: 15,

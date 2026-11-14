@@ -11,10 +11,13 @@
 //! a [`TofuStore`] trait so the embedder chooses
 //! durability: [`InMemoryTofu`] holds pins for the process; a host with a
 //! profile supplies its own durable store (a file, a database, an engram).
-//! The store is installed once via [`set_trust_store`]; until then errand
-//! is [`PermissiveTofu`] — accept-any, byte-for-byte the pre-pinning
-//! behaviour — so adding this module changes nothing for callers that do
-//! not opt in.
+//! The store is installed once via [`set_trust_store`]. Until one is
+//! installed, every TLS connection through this module (gemini fetches,
+//! titan uploads, and [`crate::tofu_connect`] callers such as scroll) is
+//! refused before a socket is opened: nothing is trusted by default.
+//! Choosing trust is the embedder's job, not the fetcher's; a host that wants
+//! a throwaway session installs [`InMemoryTofu`], and one that wants the old
+//! accept-any behaviour installs [`PermissiveTofu`] by name.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -67,9 +70,9 @@ impl TofuStore for InMemoryTofu {
 }
 
 /// The accept-any store: never reports a pin, never records one. With it
-/// installed (the default when none is set), every TLS handshake is treated
-/// as a first contact and accepted — the permissive TOFU `errand` used
-/// before pinning existed.
+/// installed, every TLS handshake is treated as a first contact and accepted.
+/// It is never installed by default; an embedder that wants accept-any says
+/// so by installing it.
 #[derive(Debug, Default)]
 pub struct PermissiveTofu;
 
@@ -85,20 +88,20 @@ static TRUST_STORE: RwLock<Option<Arc<dyn TofuStore>>> = RwLock::new(None);
 /// Install the process-wide [`TofuStore`] errand's TLS schemes pin against.
 ///
 /// Call once at startup (e.g. with an [`InMemoryTofu`] or a durable store).
-/// Until a store is installed, errand uses [`PermissiveTofu`]. The most
-/// recent call wins.
+/// Until a store is installed, every TLS connection is refused before it is
+/// opened. The most recent call wins.
 pub fn set_trust_store(store: Arc<dyn TofuStore>) {
     *TRUST_STORE.write().unwrap() = Some(store);
 }
 
-/// The installed trust store, or a [`PermissiveTofu`] when none is set.
-pub(crate) fn trust_store() -> Arc<dyn TofuStore> {
-    TRUST_STORE
-        .read()
-        .unwrap()
-        .clone()
-        .unwrap_or_else(|| Arc::new(PermissiveTofu))
+/// The installed trust store, or `None` when no embedder has installed one.
+pub(crate) fn trust_store() -> Option<Arc<dyn TofuStore>> {
+    TRUST_STORE.read().unwrap().clone()
 }
+
+/// The refusal a TLS connection gets when no store is installed.
+pub(crate) const NO_TRUST_STORE: &str = "no trust store installed: call set_trust_store \
+    (gemini_protocol or errand) with a TofuStore before fetching; nothing is trusted by default";
 
 /// The SHA-256 fingerprint of a certificate's DER bytes, via rustls's ring
 /// provider (already in the dependency cone).

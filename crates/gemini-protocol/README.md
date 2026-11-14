@@ -40,9 +40,12 @@ certificate to pin, wants `client` without `tls`.
 The host's pinned fingerprint is checked *during* the handshake, a first
 contact is pinned once it completes, and a changed certificate surfaces as
 `CertificateChanged` before the request is ever sent, so nothing is disclosed
-to whoever answered. Install a store with `set_trust_store`; the default is
-permissive, which is a deliberate choice a host must override rather than a
-silent one.
+to whoever answered. Install a store with `set_trust_store` before the first
+TLS request: with none installed, a fetch, a titan upload or a `tofu_connect`
+is refused with an error naming `set_trust_store`, before any socket is
+opened. There is no default store. `InMemoryTofu` serves a session that needs
+no durability, and `PermissiveTofu` (accept-any) exists for a host that
+chooses it by name.
 
 ## Status classes stay apart
 

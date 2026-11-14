@@ -67,6 +67,8 @@ async fn caller_identity_is_presented_in_the_tls_handshake() {
     use tokio::net::TcpListener;
     use tokio_rustls::TlsAcceptor;
 
+    // This test is about the client certificate, not server trust.
+    crate::set_trust_store(Arc::new(crate::PermissiveTofu));
     let server_key = KeyPair::generate().unwrap();
     let server_cert = CertificateParams::new(vec!["localhost".into()])
         .unwrap()

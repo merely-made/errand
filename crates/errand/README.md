@@ -150,8 +150,10 @@ whether to re-pin.
 The pin store is the `TofuStore` trait, so the embedder chooses durability.
 `InMemoryTofu` holds pins for the process lifetime. A host with a profile can
 supply its own durable store. The store is installed once via `set_trust_store`;
-until then `errand` uses `PermissiveTofu` (accept-any), so the module changes
-nothing for callers that do not opt in.
+until then every gemini, titan and scroll request fails with an error naming
+`set_trust_store`, before any connection is opened. Nothing is trusted by
+default. `PermissiveTofu` (accept-any) is still there for an embedder that
+installs it by name.
 
 ## Install
 

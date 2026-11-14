@@ -146,9 +146,11 @@ pub(crate) async fn tofu_connect_inner(
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>, ClientError> {
     use crate::{tls, tofu};
 
+    // No installed store, no connection: refuse before any socket is opened.
     // Look the capsule target's pin up before connecting (so the verifier stays
     // 'static), then wrap TCP in a pinning TLS handshake.
-    let store = tofu::trust_store();
+    let store =
+        tofu::trust_store().ok_or_else(|| ClientError::Connect(tofu::NO_TRUST_STORE.into()))?;
     let target = tofu::target(host, port);
     let pinned = store.fingerprint(&target);
     let (connector, seen) =
