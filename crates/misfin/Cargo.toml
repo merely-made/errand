@@ -5,7 +5,7 @@ edition = "2024"
 
 rust-version = "1.97.1"
 license = "MIT"
-repository = "https://github.com/merely-made/smolweb"
+repository = "https://github.com/merely-made/errand"
 description = "An embeddable implementation of the Misfin mail protocol: identities, gemmail, a sending client, and a receive server. Not the reference implementation — the protocol is lem's (misfin.org)."
 keywords = ["misfin", "gemini", "mail", "smallweb", "gemtext"]
 categories = ["email", "network-programming"]

@@ -5,7 +5,7 @@ edition = "2024"
 
 rust-version = "1.97.1"
 license = "MIT"
-repository = "https://github.com/merely-made/smolweb"
+repository = "https://github.com/merely-made/errand"
 description = "An implementation of the Gemini protocol (gemini://) and the formats and companions defined with it: the gemtext document grammar, real trust-on-first-use TLS pinning, and titan:// upload. The gemtext parser has no dependencies, and the protocol runs over any stream."
 keywords = ["gemini", "gemtext", "smolweb", "titan", "protocol"]
 categories = ["network-programming"]

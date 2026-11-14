@@ -5,7 +5,7 @@ edition = "2024"
 
 rust-version = "1.97.1"
 license = "MIT"
-repository = "https://github.com/merely-made/smolweb"
+repository = "https://github.com/merely-made/errand"
 description = "An implementation of the Nex protocol (nex://): async client, directory-serving server, listing parser, and a CLI. The minimal smolweb protocol — plaintext TCP, no TLS, no status codes."
 keywords = ["nex", "smolweb", "gopher", "gemini", "protocol"]
 categories = ["network-programming"]

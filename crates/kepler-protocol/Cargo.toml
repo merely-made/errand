@@ -5,7 +5,7 @@ edition = "2024"
 
 rust-version = "1.97.1"
 license = "MIT"
-repository = "https://github.com/merely-made/smolweb"
+repository = "https://github.com/merely-made/errand"
 description = "An implementation of the Kepler protocol (kepler:// and keplers://): async client and wire grammar. Gemini's shape plus the small web's only cache model, with declared body lengths, last-updated and expiry, and language negotiation."
 keywords = ["kepler", "smolweb", "protocol", "gemini", "cache"]
 categories = ["network-programming"]
