@@ -9,6 +9,7 @@
 //! pins it (trust-on-first-use is then the caller storing the first-seen value
 //! and passing it back on later sends).
 
+use crate::ExposeSecret;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -294,7 +295,7 @@ pub async fn send(
                 .with_client_auth_cert(
                     chain,
                     PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-                        identity.private_key_pkcs8_der.clone(),
+                        identity.private_key_pkcs8_der.expose_secret().to_vec(),
                     )),
                 )
                 .map_err(|error| SendError::Tls(error.to_string()))?

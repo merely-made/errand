@@ -1,4 +1,5 @@
 use super::*;
+use crate::ExposeSecret;
 
 #[tokio::test]
 async fn native_tcp_peer_stalling_during_tls_handshake_is_closed_at_phase_deadline() {
@@ -13,7 +14,7 @@ async fn native_tcp_peer_stalling_during_tls_handshake_is_closed_at_phase_deadli
     let server = crate::server::MisfinServer::new(
         MisfinServerConfig::new(
             identity.certificate_der,
-            identity.private_key_pkcs8_der,
+            identity.private_key_pkcs8_der.expose_secret().to_vec(),
             Vec::new(),
         ),
         MailboxStore::in_memory().unwrap(),
@@ -61,7 +62,7 @@ async fn expired_acceptance_deadline_stops_native_handshake_before_it_starts() {
     let server = crate::server::MisfinServer::new(
         MisfinServerConfig::new(
             identity.certificate_der,
-            identity.private_key_pkcs8_der,
+            identity.private_key_pkcs8_der.expose_secret().to_vec(),
             Vec::new(),
         ),
         MailboxStore::in_memory().unwrap(),
@@ -110,7 +111,7 @@ async fn native_tls_client_stalling_after_handshake_is_closed_without_mail() {
     let server = crate::server::MisfinServer::new(
         MisfinServerConfig::new(
             identity.certificate_der,
-            identity.private_key_pkcs8_der,
+            identity.private_key_pkcs8_der.expose_secret().to_vec(),
             Vec::new(),
         ),
         store.clone(),
@@ -162,7 +163,7 @@ async fn public_listener_passes_configured_deadlines_and_gives_each_accept_a_fre
     .unwrap();
     let mut config = MisfinServerConfig::new(
         identity.certificate_der,
-        identity.private_key_pkcs8_der,
+        identity.private_key_pkcs8_der.expose_secret().to_vec(),
         Vec::new(),
     );
     // The whole allowance wins; neither listener idle time nor earlier peers

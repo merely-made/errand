@@ -110,7 +110,7 @@ fn identity_material(identity: &ClientIdentity) -> Result<misfin::MisfinIdentity
     };
     Ok(misfin::MisfinIdentityMaterial {
         certificate_der: leaf.as_ref().to_vec(),
-        private_key_pkcs8_der: key.secret_pkcs8_der().to_vec(),
+        private_key_pkcs8_der: key.secret_pkcs8_der().to_vec().into(),
     })
 }
 
@@ -162,7 +162,7 @@ fn map_error(error: misfin::SendError) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use misfin::{MisfinStatus, SendReceipt};
+    use misfin::{ExposeSecret, MisfinStatus, SendReceipt};
 
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()
@@ -187,7 +187,13 @@ mod tests {
         .unwrap();
         ClientIdentity {
             cert_chain: vec![material.certificate_der.into()],
-            private_key: PrivateKeyDer::Pkcs8(material.private_key_pkcs8_der.into()),
+            private_key: PrivateKeyDer::Pkcs8(
+                material
+                    .private_key_pkcs8_der
+                    .expose_secret()
+                    .to_vec()
+                    .into(),
+            ),
         }
     }
 

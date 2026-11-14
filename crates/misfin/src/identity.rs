@@ -7,11 +7,14 @@
 //! (Ed25519 from a caller-supplied 32-byte seed; nothing to back up).
 
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use rustls_pki_types::CertificateDer;
-use serde::{Deserialize, Serialize};
+use secrecy::{ExposeSecret, SecretSlice, SecretString};
+use serde::{Deserialize, Serialize, Serializer};
+use zeroize::Zeroizing;
 
 use super::helpers::*;
 use super::{MisfinIdentityMaterial, MisfinIdentitySpec, MisfinIdentityStatus};
@@ -20,18 +23,30 @@ use super::{MisfinIdentityMaterial, MisfinIdentitySpec, MisfinIdentityStatus};
 /// stores the mailbox name.
 pub(super) const MISFIN_USER_ID_OID: [u64; 7] = [0, 9, 2342, 19200300, 100, 1, 1];
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// The on-disk identity file. Field names and order are the file format;
+/// the key hex is a secret while it is in memory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedMisfinIdentity {
     address: String,
     blurb: Option<String>,
     certificate_der_hex: String,
-    private_key_der_hex: String,
+    #[serde(serialize_with = "serialize_exposed")]
+    private_key_der_hex: SecretString,
+}
+
+/// `secrecy` serializes nothing by default; the identity file is the one
+/// place this key hex is meant to be written.
+fn serialize_exposed<S: Serializer>(
+    secret: &SecretString,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(secret.expose_secret())
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct MisfinClientIdentity {
     pub(super) certificate_chain: Vec<CertificateDer<'static>>,
-    pub(super) private_key_der: Vec<u8>,
+    pub(super) private_key_der: SecretSlice<u8>,
 }
 
 impl From<MisfinClientIdentity> for MisfinIdentityMaterial {
@@ -66,24 +81,12 @@ pub(super) fn load_or_create_identity(
     let path = identity_path_for_spec(spec, identity_root);
 
     if path.exists() {
-        let content = fs::read_to_string(&path).map_err(|error| {
-            format!(
-                "Failed to read Misfin identity '{}': {error}",
-                path.display()
-            )
-        })?;
-        let persisted: PersistedMisfinIdentity =
-            serde_json::from_str(&content).map_err(|error| {
-                format!(
-                    "Failed to parse Misfin identity '{}': {error}",
-                    path.display()
-                )
-            })?;
+        let persisted = read_persisted(&path)?;
         return Ok(MisfinClientIdentity {
             certificate_chain: vec![CertificateDer::from(decode_hex(
                 &persisted.certificate_der_hex,
             )?)],
-            private_key_der: decode_hex(&persisted.private_key_der_hex)?,
+            private_key_der: decode_hex(persisted.private_key_der_hex.expose_secret())?.into(),
         });
     }
 
@@ -92,21 +95,50 @@ pub(super) fn load_or_create_identity(
         address: spec.address.as_addr_spec(),
         blurb: spec.blurb.clone(),
         certificate_der_hex: encode_hex(identity.certificate_chain[0].as_ref()),
-        private_key_der_hex: encode_hex(&identity.private_key_der),
+        private_key_der_hex: encode_hex(identity.private_key_der.expose_secret()).into(),
     };
-    let content = serde_json::to_string_pretty(&persisted).map_err(|error| {
+    let content = Zeroizing::new(serde_json::to_string_pretty(&persisted).map_err(|error| {
         format!(
             "Failed to serialize Misfin identity '{}': {error}",
             path.display()
         )
-    })?;
-    fs::write(&path, content).map_err(|error| {
+    })?);
+    write_owner_only(&path, content.as_bytes()).map_err(|error| {
         format!(
             "Failed to persist Misfin identity '{}': {error}",
             path.display()
         )
     })?;
     Ok(identity)
+}
+
+fn read_persisted(path: &Path) -> Result<PersistedMisfinIdentity, String> {
+    let content = Zeroizing::new(fs::read_to_string(path).map_err(|error| {
+        format!(
+            "Failed to read Misfin identity '{}': {error}",
+            path.display()
+        )
+    })?);
+    serde_json::from_str(&content).map_err(|error| {
+        format!(
+            "Failed to parse Misfin identity '{}': {error}",
+            path.display()
+        )
+    })
+}
+
+/// Create `path` (it must not exist) readable only by its owner: mode 0600
+/// on Unix, set at creation so the key is never on disk with wider access.
+/// Elsewhere the file takes the platform default (on Windows, the parent
+/// directory's inherited ACL).
+fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 /// Report the persisted identity for `spec` under `identity_root` without
@@ -127,18 +159,7 @@ pub fn identity_status_with_root(
         });
     }
 
-    let content = fs::read_to_string(&path).map_err(|error| {
-        format!(
-            "Failed to read Misfin identity '{}': {error}",
-            path.display()
-        )
-    })?;
-    let persisted: PersistedMisfinIdentity = serde_json::from_str(&content).map_err(|error| {
-        format!(
-            "Failed to parse Misfin identity '{}': {error}",
-            path.display()
-        )
-    })?;
+    let persisted = read_persisted(&path)?;
     let certificate_der = decode_hex(&persisted.certificate_der_hex)?;
 
     Ok(MisfinIdentityStatus {
@@ -219,7 +240,7 @@ pub(super) fn generate_identity(spec: &MisfinIdentitySpec) -> Result<MisfinClien
 
     Ok(MisfinClientIdentity {
         certificate_chain: vec![CertificateDer::from(cert.der().to_vec())],
-        private_key_der: key_pair.serialize_der(),
+        private_key_der: key_pair.serialize_der().into(),
     })
 }
 
@@ -238,7 +259,8 @@ pub fn deterministic_identity(
 ) -> Result<MisfinIdentityMaterial, String> {
     // Import the Ed25519 key from its PKCS#8 wrapper; rcgen infers Ed25519 from
     // the embedded algorithm OID.
-    let key_pair = KeyPair::try_from(ed25519_pkcs8_der(seed).as_slice())
+    let pkcs8 = ed25519_pkcs8_der(seed);
+    let key_pair = KeyPair::try_from(pkcs8.as_slice())
         .map_err(|error| format!("Misfin Ed25519 key import failed: {error}"))?;
 
     let mut params = spec_certificate_params(spec)?;
@@ -252,18 +274,18 @@ pub fn deterministic_identity(
 
     Ok(MisfinIdentityMaterial {
         certificate_der: cert.der().to_vec(),
-        private_key_pkcs8_der: key_pair.serialize_der(),
+        private_key_pkcs8_der: key_pair.serialize_der().into(),
     })
 }
 
 /// The PKCS#8 v1 (RFC 8410) DER encoding of an Ed25519 private key from its
 /// 32-byte `seed`: a fixed 16-byte prefix followed by the seed.
-fn ed25519_pkcs8_der(seed: &[u8; 32]) -> Vec<u8> {
+fn ed25519_pkcs8_der(seed: &[u8; 32]) -> Zeroizing<Vec<u8>> {
     const PREFIX: [u8; 16] = [
         0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04,
         0x20,
     ];
-    let mut der = Vec::with_capacity(PREFIX.len() + seed.len());
+    let mut der = Zeroizing::new(Vec::with_capacity(PREFIX.len() + seed.len()));
     der.extend_from_slice(&PREFIX);
     der.extend_from_slice(seed);
     der
@@ -287,7 +309,7 @@ pub fn identity_with_validity_years(
         .map_err(|error| format!("Misfin identity certificate generation failed: {error}"))?;
     Ok(MisfinIdentityMaterial {
         certificate_der: cert.der().to_vec(),
-        private_key_pkcs8_der: key_pair.serialize_der(),
+        private_key_pkcs8_der: key_pair.serialize_der().into(),
     })
 }
 
@@ -344,7 +366,10 @@ mod tests {
         // Ed25519 deterministic signatures + fixed serial/validity => a byte-stable
         // cert, hence a stable SHA-256 fingerprint (the misfin identity).
         assert_eq!(a.certificate_der, b.certificate_der, "cert is reproducible");
-        assert_eq!(a.private_key_pkcs8_der, b.private_key_pkcs8_der);
+        assert_eq!(
+            a.private_key_pkcs8_der.expose_secret(),
+            b.private_key_pkcs8_der.expose_secret()
+        );
         assert!(!a.certificate_der.is_empty());
     }
 
@@ -371,5 +396,83 @@ mod tests {
             identity_salt(&alice_again),
             "stable per address"
         );
+    }
+
+    /// The identity file as the pre-secrets code wrote it: four plain strings.
+    #[derive(Serialize, Deserialize)]
+    struct LegacyFile {
+        address: String,
+        blurb: Option<String>,
+        certificate_der_hex: String,
+        private_key_der_hex: String,
+    }
+
+    #[test]
+    fn debug_never_prints_the_key() {
+        let material = deterministic_identity(&[7u8; 32], &spec("alice@example.test")).unwrap();
+        let key_hex = encode_hex(material.private_key_pkcs8_der.expose_secret());
+        let tempdir = TempDir::new().unwrap();
+        let client = load_or_create_identity(&spec("alice@example.test"), tempdir.path()).unwrap();
+        let client_key_hex = encode_hex(client.private_key_der.expose_secret());
+        let persisted = read_persisted(&identity_path_for_spec(
+            &spec("alice@example.test"),
+            tempdir.path(),
+        ))
+        .unwrap();
+
+        for (printed, key) in [
+            (format!("{material:?}"), &key_hex),
+            (format!("{client:?}"), &client_key_hex),
+            (format!("{persisted:?}"), &client_key_hex),
+        ] {
+            assert!(!printed.contains(key.as_str()), "key hex in {printed}");
+            assert!(printed.contains("REDACTED"), "no redaction in {printed}");
+        }
+    }
+
+    #[test]
+    fn an_existing_format_identity_file_still_loads() {
+        let tempdir = TempDir::new().unwrap();
+        let spec = spec("alice@example.test");
+        let material = deterministic_identity(&[9u8; 32], &spec).unwrap();
+        let legacy = LegacyFile {
+            address: spec.address.as_addr_spec(),
+            blurb: spec.blurb.clone(),
+            certificate_der_hex: encode_hex(&material.certificate_der),
+            private_key_der_hex: encode_hex(material.private_key_pkcs8_der.expose_secret()),
+        };
+        let path = identity_path_for_spec(&spec, tempdir.path());
+        fs::write(&path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+
+        let loaded = identity_material_with_root(&spec, tempdir.path()).unwrap();
+        assert_eq!(loaded.certificate_der, material.certificate_der);
+        assert_eq!(
+            loaded.private_key_pkcs8_der.expose_secret(),
+            material.private_key_pkcs8_der.expose_secret()
+        );
+    }
+
+    #[test]
+    fn a_new_identity_file_is_byte_identical_to_the_old_format() {
+        let tempdir = TempDir::new().unwrap();
+        let spec = spec("alice@example.test");
+        ensure_identity_with_root(&spec, tempdir.path()).unwrap();
+        let written = fs::read_to_string(identity_path_for_spec(&spec, tempdir.path())).unwrap();
+        let legacy: LegacyFile = serde_json::from_str(&written).unwrap();
+        assert_eq!(serde_json::to_string_pretty(&legacy).unwrap(), written);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_identity_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let tempdir = TempDir::new().unwrap();
+        let spec = spec("alice@example.test");
+        ensure_identity_with_root(&spec, tempdir.path()).unwrap();
+        let mode = fs::metadata(identity_path_for_spec(&spec, tempdir.path()))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 }

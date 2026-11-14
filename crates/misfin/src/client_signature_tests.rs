@@ -3,6 +3,7 @@
 //! otherwise anyone replaying a mailbox's public certificate passes its
 //! fingerprint pin.
 
+use crate::ExposeSecret;
 use std::sync::Arc;
 
 use rustls::SupportedProtocolVersion;
@@ -23,7 +24,10 @@ fn identity(seed: u8) -> (Vec<u8>, Vec<u8>) {
         },
     )
     .unwrap();
-    (material.certificate_der, material.private_key_pkcs8_der)
+    (
+        material.certificate_der.clone(),
+        material.private_key_pkcs8_der.expose_secret().to_vec(),
+    )
 }
 
 /// Presents `cert` and signs the handshake with `key`. `CertifiedKey::new`

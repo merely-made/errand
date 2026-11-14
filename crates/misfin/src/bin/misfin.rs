@@ -1,6 +1,7 @@
 //! The `misfin` command-line tool (the `cli` feature): mint identities, send
 //! mail, run a mailserver, and read an inbox.
 
+use misfin::ExposeSecret;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -200,7 +201,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let store = MailboxStore::open(&flags.store).map_err(|error| error.to_string())?;
             let config = MisfinServerConfig::new(
                 identity.certificate_der,
-                identity.private_key_pkcs8_der,
+                identity.private_key_pkcs8_der.expose_secret().to_vec(),
                 served,
             );
             let server = MisfinServer::new(config, store).map_err(|error| error.to_string())?;

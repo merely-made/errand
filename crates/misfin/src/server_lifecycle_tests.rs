@@ -1,5 +1,6 @@
 //! Admission and joined-shutdown behavior for the public Misfin listener.
 
+use crate::ExposeSecret;
 use std::future;
 use std::io;
 use std::net::SocketAddr;
@@ -30,7 +31,10 @@ fn test_identity(seed: u8, address: &str) -> (Vec<u8>, Vec<u8>) {
         },
     )
     .unwrap();
-    (identity.certificate_der, identity.private_key_pkcs8_der)
+    (
+        identity.certificate_der.clone(),
+        identity.private_key_pkcs8_der.expose_secret().to_vec(),
+    )
 }
 
 fn config_for(address: &str) -> (MisfinServerConfig, String) {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ExposeSecret;
 use crate::{MisfinIdentitySpec, MisfinStatus, client, deterministic_identity};
 use rustls::{
     DigitallySignedStruct, SignatureScheme, client::danger::HandshakeSignatureValid,
@@ -158,7 +159,10 @@ async fn round_trip_delivers_over_tls_via_the_public_client() {
     let store = MailboxStore::in_memory().unwrap();
     let config = MisfinServerConfig::new(
         server_identity.certificate_der.clone(),
-        server_identity.private_key_pkcs8_der.clone(),
+        server_identity
+            .private_key_pkcs8_der
+            .expose_secret()
+            .to_vec(),
         vec![ServedMailbox {
             address: MisfinAddress::parse("mark@example.test").unwrap(),
             fingerprint: server_fingerprint.clone(),
@@ -210,7 +214,10 @@ async fn an_over_long_request_line_gets_59() {
     let fingerprint = sha256_hex(&server_identity.certificate_der);
     let config = MisfinServerConfig::new(
         server_identity.certificate_der.clone(),
-        server_identity.private_key_pkcs8_der.clone(),
+        server_identity
+            .private_key_pkcs8_der
+            .expose_secret()
+            .to_vec(),
         vec![ServedMailbox {
             address: MisfinAddress::parse("mark@example.test").unwrap(),
             fingerprint,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ExposeSecret;
 use std::future::Future;
 use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -36,7 +37,9 @@ fn tls_fixture() -> (TlsAcceptor, String) {
         .with_no_client_auth()
         .with_single_cert(
             vec![CertificateDer::from(material.certificate_der)],
-            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(material.private_key_pkcs8_der)),
+            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+                material.private_key_pkcs8_der.expose_secret().to_vec(),
+            )),
         )
         .unwrap();
     (TlsAcceptor::from(Arc::new(config)), fingerprint)
@@ -131,7 +134,7 @@ fn preflight_zero_and_unrepresentable_budgets_do_not_need_a_runtime() {
         send_timeout: Some(Duration::ZERO),
         identity: Some(MisfinIdentityMaterial {
             certificate_der: vec![0],
-            private_key_pkcs8_der: vec![0],
+            private_key_pkcs8_der: vec![0].into(),
         }),
         ..SendOptions::default()
     };

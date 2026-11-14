@@ -21,6 +21,15 @@
 //!   redb-backed [`MailboxStore`], sender-identity extraction from client
 //!   certificates, and fingerprint-change rejection (status 63).
 //! - **`cli`**: the `misfin` binary (`id` / `send` / `serve` / `inbox`).
+//!
+//! ## Identity keys
+//!
+//! Private keys are held in `secrecy` wrappers (zeroed on drop, redacted in
+//! `Debug`). A persisted identity is a JSON file created owner-only (mode
+//! 0600) on Unix; on Windows the file takes its directory's inherited ACL,
+//! because no maintained crate sets an owner-only ACL without unsafe code of
+//! our own. Where keys should ultimately live (a keychain, custody) is not
+//! decided here, so the file format and location are unchanged.
 
 use std::path::PathBuf;
 
@@ -78,13 +87,21 @@ pub struct MisfinIdentityStatus {
 /// DER material for a misfin identity: the certificate (leaf, DER) and the
 /// private key (PKCS#8 DER). This is the shape a client-cert TLS sender
 /// consumes.
+///
+/// The key is a [`SecretSlice`]: zeroed when dropped and printed as a
+/// redaction by `Debug`. Read it with [`ExposeSecret::expose_secret`]; build
+/// one from a `Vec<u8>` with `.into()`.
 #[derive(Debug, Clone)]
 pub struct MisfinIdentityMaterial {
     /// The leaf certificate, DER-encoded.
     pub certificate_der: Vec<u8>,
     /// The private key, PKCS#8 DER-encoded.
-    pub private_key_pkcs8_der: Vec<u8>,
+    pub private_key_pkcs8_der: SecretSlice<u8>,
 }
+
+/// The secret wrappers [`MisfinIdentityMaterial`] uses, re-exported so a
+/// caller needs no direct `secrecy` dependency to build or read one.
+pub use secrecy::{ExposeSecret, SecretSlice};
 
 impl MisfinAddress {
     pub fn parse(input: &str) -> Result<Self, String> {
